@@ -2,7 +2,7 @@
 <h3 align="center">Coder from India</h3>
 
 <p align="left"> <img src="https://komarev.com/ghpvc/?username=kanishkjoshi&label=Profile%20views&color=0e75b6&style=flat" alt="kanishkjoshi" /> </p>
-![](https://github.com/KanishkJoshi/KanishkJoshi/blob/main/inosuke.gif)
+
 <h3 align="left">Connect with me:</h3>
 <p align="left">
 <a href="https://twitter.com/https://twitter.com/kanishk_joshi_" target="blank"><img align="center" src="https://raw.githubusercontent.com/rahuldkjain/github-profile-readme-generator/master/src/images/icons/Social/twitter.svg" alt="https://twitter.com/kanishk_joshi_" height="30" width="40" /></a>
