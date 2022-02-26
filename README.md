@@ -3,7 +3,7 @@
 
 <p align="left"> <img src="https://komarev.com/ghpvc/?username=kanishkjoshi&label=Profile%20views&color=0e75b6&style=flat" alt="kanishkjoshi" /> </p>
 
-<p><img align="center" alt = ""gif" src="https://github.com/KanishkJoshi/KanishkJoshi/blob/main/inosuke.gif" /></p>
+<p><img align="right" alt = ""gif" src="https://github.com/KanishkJoshi/KanishkJoshi/blob/main/inosuke.gif" /></p>
 
 <h3 align="left">Connect with me:</h3>
 <p align="left">
