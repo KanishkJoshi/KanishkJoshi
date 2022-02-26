@@ -2,6 +2,7 @@
 <h3 align="center">Coder from India</h3>
 
 <p align="left"> <img src="https://komarev.com/ghpvc/?username=kanishkjoshi&label=Profile%20views&color=0e75b6&style=flat" alt="kanishkjoshi" /> </p>
+![inosuke](https://user-images.githubusercontent.com/83103288/155838844-7121ec68-32d4-47a5-81e6-227cb39b2403.gif)
 
 <h3 align="left">Connect with me:</h3>
 <p align="left">
