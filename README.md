@@ -8,7 +8,7 @@
 - 📫 How to reach me **kanishak.joshi@gmail.com**
 
 - ⚡ Fun fact **MY CODE DOESN'T WORKS EVEN AFTER CTRL + V!!! ◉_◉**
-<p align="right"> ![Alt Text](https://github.com/KanishkJoshi/KanishkJoshi/blob/main/inosuke.gif)</p>
+![Alt Text](https://github.com/KanishkJoshi/KanishkJoshi/blob/main/inosuke.gif)
 
 <h3 align="left">Connect with me:</h3>
 <p align="left">
