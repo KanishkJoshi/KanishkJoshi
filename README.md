@@ -3,12 +3,14 @@
 
 <p align="left"> <img src="https://komarev.com/ghpvc/?username=kanishkjoshi&label=Profile%20views&color=0e75b6&style=flat" alt="kanishkjoshi" /> </p>
 
+<img align="right" alt="Coding" width="400" src="https://github.com/KanishkJoshi/KanishkJoshi/blob/main/inosuke.gif">
+
 - 🌱 I’m currently learning **C++ and Java**
 
 - 📫 How to reach me **kanishak.joshi@gmail.com**
 
 - ⚡ Fun fact **MY CODE DOESN'T WORKS EVEN AFTER CTRL + V!!! ◉_◉**
-<img align="right" alt="Coding" width="400" src="https://github.com/KanishkJoshi/KanishkJoshi/blob/main/inosuke.gif">
+
 
 
 <h3 align="left">Connect with me:</h3>
@@ -25,3 +27,5 @@
 <p>&nbsp;<img align="center" src="https://github-readme-stats.vercel.app/api?username=kanishkjoshi&show_icons=true&locale=en" alt="kanishkjoshi" /></p>
 
 <p><img align="center" src="https://github-readme-streak-stats.herokuapp.com/?user=kanishkjoshi&" alt="kanishkjoshi" /></p>
+
+<img align="right" alt="Coding" width="400" src="https://github.com/KanishkJoshi/KanishkJoshi/blob/main/coderuns.gif">
