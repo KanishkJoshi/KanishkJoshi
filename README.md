@@ -1,5 +1,5 @@
 <h1 align="center">Hi 👋, I'm Kanishk Joshi</h1>
-<h3 align="center">A passionate Code from India!!</h3>
+<h3 align="center">A passionate Coder from India!!</h3>
 
 <p align="left"> <img src="https://komarev.com/ghpvc/?username=kanishkjoshi&label=Profile%20views&color=0e75b6&style=flat" alt="kanishkjoshi" /> </p>
 
