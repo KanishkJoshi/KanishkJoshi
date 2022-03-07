@@ -23,6 +23,6 @@
 
 <p>&nbsp;<img align="center" src="https://github-readme-stats.vercel.app/api?username=kanishkjoshi&show_icons=true&locale=en" alt="kanishkjoshi" /></p>
 
-<p align="right"> <img src="https://github.com/KanishkJoshi/KanishkJoshi/blob/main/coderuns.gif" alt="kanishkjoshi" /> </p>
+<p align="right"> <img src="https://github.com/KanishkJoshi/KanishkJoshi/blob/main/coderuns.gif" alt="kanishkjoshi" /> 
 
-<p><img align="center" src="https://github-readme-streak-stats.herokuapp.com/?user=kanishkjoshi&" alt="kanishkjoshi" /></p>
+<img align="center" src="https://github-readme-streak-stats.herokuapp.com/?user=kanishkjoshi&" alt="kanishkjoshi" /></p>
