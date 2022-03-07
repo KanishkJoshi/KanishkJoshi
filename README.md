@@ -2,6 +2,7 @@
 <h3 align="center">A passionate Code from India!!</h3>
 
 <p align="left"> <img src="https://komarev.com/ghpvc/?username=kanishkjoshi&label=Profile%20views&color=0e75b6&style=flat" alt="kanishkjoshi" /> </p>
+<p align="right"> <img src="https://github.com/KanishkJoshi/KanishkJoshi/blob/main/inosuke.gif" alt="kanishkjoshi" /> </p>
 
 - 🌱 I’m currently learning **C++ and Java**
 
