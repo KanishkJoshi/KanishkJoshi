@@ -94,23 +94,33 @@ const ic = (n, cls = '') => `<svg class="ic ${cls}" aria-hidden="true" focusable
 const capLogo = () => '<svg class="cap" aria-hidden="true" focusable="false"><use href="#i-cap"></use></svg>';
 
 // ───────────────────────────── platform ─────────────────────────────
+const CFG = window.MYQUIZ_CONFIG || {};
+// Tester build (demo): content, progress and admin changes stay in this browser, and a bug reporter
+// plus a guided test plan are added. Enable with MYQUIZ_CONFIG.demo or ?demo=1 on a static host.
+const DEMO = !!CFG.demo || /[?&]demo(=1|=true)?(&|$)/.test(location.search);
+const BUILD = String(CFG.build || 'v1.0');
 const P = {
   mode: window.claude && typeof window.claude.use === 'function' ? 'artifact' : 'standalone',
-  db: null, user: null, sample: null, uid: null,
-  isAdmin: false, ready: false, progressRemote: false,
+  demo: DEMO,
+  db: null,  // the artifact database, when this view has one
+  cdb: null, // database for content and progress; null keeps them in this browser
+  user: null, sample: null, uid: null,
+  isAdmin: false, editor: false, ready: false, progressRemote: false,
 };
-if (P.mode === 'standalone') P.isAdmin = true; // local demo: the admin panel edits this browser's copy only
-const aiEndpoint = () => (window.MYQUIZ_CONFIG && window.MYQUIZ_CONFIG.aiEndpoint) || '';
+const LOCAL = () => P.mode === 'standalone' || P.demo;
+if (LOCAL()) P.isAdmin = true; // local demo: the admin panel edits this browser's copy only
+const aiEndpoint = () => CFG.aiEndpoint || '';
 
 async function initPlatform() {
   if (P.mode !== 'artifact') { P.ready = true; return; }
   const use = n => Promise.resolve().then(() => window.claude.use(n)).catch(() => null);
   const [db, user, sample] = await Promise.all([use('db'), use('user'), use('sample')]);
-  P.db = db; P.user = user; P.sample = sample;
+  P.db = db; P.cdb = P.demo ? null : db; P.user = user; P.sample = sample;
   if (user) {
     try { P.uid = await user.id(); } catch { P.uid = null; }
-    try { P.isAdmin = !!db && (await user.canEdit()); } catch { P.isAdmin = false; }
+    try { P.editor = !!db && (await user.canEdit()); } catch { P.editor = false; }
   }
+  P.isAdmin = P.demo ? true : P.editor;
   P.ready = true;
 }
 
@@ -258,13 +268,13 @@ function loadLocalCms() {
   C.liveState = 'ok'; C.cmsState = 'ok';
 }
 function subscribeLive() {
-  if (!P.db) { C.liveState = 'off'; return; }
+  if (!P.cdb) { C.liveState = 'off'; return; }
   C.liveState = 'loading';
   const timer = setTimeout(() => { if (C.liveState === 'loading') { C.liveState = 'slow'; bump(); } }, 10000);
   const check = { q: validQ, news: validNews, days: validDay };
   for (const k of Object.keys(check)) {
     try {
-      P.db.collection(`pub/${k}/items`).onSnapshot(snap => {
+      P.cdb.collection(`pub/${k}/items`).onSnapshot(snap => {
         C.pub[k] = snap.docs.map(d => ({ ...d.data(), id: d.id })).filter(check[k]);
         if (!snap.metadata.fromCache) { clearTimeout(timer); C.liveState = 'ok'; }
         bump();
@@ -273,16 +283,16 @@ function subscribeLive() {
   }
 }
 function subscribeCms() {
-  if (!P.db || !P.isAdmin) return;
+  if (!P.cdb || !P.isAdmin) return;
   C.cmsState = 'loading';
   const timer = setTimeout(() => { if (C.cmsState === 'loading') { C.cmsState = 'slow'; bump(); } }, 10000);
   try {
-    P.db.collection('cms/drafts/items').onSnapshot(snap => {
+    P.cdb.collection('cms/drafts/items').onSnapshot(snap => {
       C.drafts = snap.docs.map(d => ({ ...clone(d.data()), id: d.id })).filter(d => d.data);
       if (!snap.metadata.fromCache) { clearTimeout(timer); C.cmsState = 'ok'; }
       bump();
     }, () => { clearTimeout(timer); C.cmsState = 'error'; bump(); });
-    P.db.collection('reports').onSnapshot(snap => {
+    P.cdb.collection('reports').onSnapshot(snap => {
       C.reports = snap.docs.flatMap(d => { const items = (d.data() || {}).items; return Array.isArray(items) ? items.map(r => ({ ...r, uid: d.id })) : []; });
       bump();
     }, () => { /* reports are optional */ });
@@ -356,17 +366,17 @@ const CMS = {
   async putDraft(d) {
     const now = Date.now();
     const doc = clone({ ...d, id: d.id || rid(), createdAt: d.createdAt || now, updatedAt: now });
-    if (P.db) await P.db.doc(`cms/drafts/items/${doc.id}`).set(doc);
+    if (P.cdb) await P.cdb.doc(`cms/drafts/items/${doc.id}`).set(doc);
     else { const i = C.drafts.findIndex(x => x.id === doc.id); if (i >= 0) C.drafts[i] = doc; else C.drafts.push(doc); this.saveLocal(); bump(); }
     return doc;
   },
   async delDraft(id) {
-    if (P.db) await P.db.doc(`cms/drafts/items/${id}`).delete();
+    if (P.cdb) await P.cdb.doc(`cms/drafts/items/${id}`).delete();
     else { C.drafts = C.drafts.filter(x => x.id !== id); this.saveLocal(); bump(); }
   },
   async putPub(coll, item) {
     const doc = clone(item);
-    if (P.db) await P.db.doc(`pub/${coll}/items/${doc.id}`).set(doc);
+    if (P.cdb) await P.cdb.doc(`pub/${coll}/items/${doc.id}`).set(doc);
     else { const arr = C.pub[coll]; const i = arr.findIndex(x => x.id === doc.id); if (i >= 0) arr[i] = doc; else arr.push(doc); this.saveLocal(); bump(); }
   },
   async publish(d, publishAt) {
@@ -375,24 +385,24 @@ const CMS = {
     await this.delDraft(d.id);
   },
   async unpublish(coll, id) {
-    if (P.db) await P.db.doc(`pub/${coll}/items/${id}`).delete();
+    if (P.cdb) await P.cdb.doc(`pub/${coll}/items/${id}`).delete();
     else { C.pub[coll] = C.pub[coll].filter(x => x.id !== id); this.saveLocal(); bump(); }
   },
   async hide(coll, id) { await this.putPub(coll, { id, hidden: true, publishAt: todayISO(), publishedAt: Date.now() }); },
   async report(q, reason, note) {
     const r = { id: rid(), qid: q.id, qtext: String(q.q).slice(0, 240), reason, note: String(note || '').slice(0, 500), at: Date.now() };
-    if (P.db && P.uid) {
-      const ref = P.db.doc(`reports/${P.uid}`);
+    if (P.cdb && P.uid) {
+      const ref = P.cdb.doc(`reports/${P.uid}`);
       const snap = await ref.get();
       const prev = snap.exists && Array.isArray((snap.data() || {}).items) ? clone(snap.data().items).slice(-49) : [];
       prev.push(r);
       await ref.set({ items: prev });
-    } else if (P.mode === 'standalone') { C.reports.push({ ...r, uid: 'local' }); this.saveLocal(); bump(); }
+    } else if (LOCAL()) { C.reports.push({ ...r, uid: 'local' }); this.saveLocal(); bump(); }
     else throw { code: 'not_granted' };
   },
   async resolveReport(r) {
-    if (P.db) {
-      const ref = P.db.doc(`reports/${r.uid}`);
+    if (P.cdb) {
+      const ref = P.cdb.doc(`reports/${r.uid}`);
       const snap = await ref.get();
       if (!snap.exists) return;
       const items = ((snap.data() || {}).items || []).filter(x => x.id !== r.id);
@@ -418,9 +428,9 @@ const U = {
   },
   load() { this.s = this.norm(LS.get('progress', null)); },
   async syncRemote() {
-    if (!P.db || !P.uid) return;
+    if (!P.cdb || !P.uid) return;
     try {
-      const snap = await P.db.doc(`data/users/${P.uid}/progress`).get();
+      const snap = await P.cdb.doc(`data/users/${P.uid}/progress`).get();
       P.progressRemote = true;
       if (snap.exists) {
         const r = this.norm(clone(snap.data()));
@@ -435,7 +445,7 @@ const U = {
     if (!P.progressRemote) return;
     if (this.busy) { this.again = true; return; }
     this.busy = true;
-    try { await P.db.doc(`data/users/${P.uid}/progress`).set(clone(this.s)); }
+    try { await P.cdb.doc(`data/users/${P.uid}/progress`).set(clone(this.s)); }
     catch (e) { if (e && ['invalid_argument', 'not_granted', 'revoked', 'capability_disabled', 'capability_removed', 'quota_exceeded'].includes(e.code)) P.progressRemote = false; }
     finally { this.busy = false; if (this.again) { this.again = false; this.flush(); } }
   },
@@ -768,7 +778,7 @@ function vHome() {
   ${due ? `<button class="revise" data-act="start-revision"><span class="ico">${ic('rotate')}</span><span class="row-main"><b>${due} प्रश्न दोहराव के लिए तैयार</b><span class="row-sub">पहले गलत हुए प्रश्न फिर से हल करें — याद पक्की होगी</span></span>${ic('chev-right', 'chev')}</button>` : ''}
   <section aria-label="आज के महत्वपूर्ण विषय"><h2 class="sec-title">${ic('star', 'star')} आज के महत्वपूर्ण विषय</h2><div class="chips" style="margin-top:10px">${C.baseState === 'loading' ? '<div class="skeleton" style="height:34px;width:100%"></div>' : topicChips()}</div></section>
   ${latest.length ? `<section style="display:flex;flex-direction:column;gap:10px"><div class="sec-head"><h2 class="sec-title">${ic('newspaper')} ताज़ा करेंट अफेयर्स</h2><a class="link" href="#ca">सभी देखें ${ic('chev-right')}</a></div>${latest.map(newsCard).join('')}</section>` : ''}
-  ${P.isAdmin ? `<a class="act" href="#admin"><span class="ai">${ic('settings')}</span><span>एडमिन पैनल<span class="row-sub">${P.mode === 'standalone' ? 'डेमो: समाचार, AI प्रश्न, समीक्षा और प्रकाशन' : 'समाचार, AI प्रश्न, समीक्षा और प्रकाशन'}</span></span>${ic('chev-right', 'chev')}</a>` : ''}
+  ${P.isAdmin ? `<a class="act" href="#admin"><span class="ai">${ic('settings')}</span><span>एडमिन पैनल<span class="row-sub">${LOCAL() ? 'डेमो: समाचार, AI प्रश्न, समीक्षा और प्रकाशन' : 'समाचार, AI प्रश्न, समीक्षा और प्रकाशन'}</span></span>${ic('chev-right', 'chev')}</a>` : ''}
 </main>
 ${bottomNav('home')}`;
 }
@@ -1109,7 +1119,7 @@ function vProfile() {
   const tot = U.totals(), st = U.streak(), s = U.s;
   const name = s.name.trim();
   const subj = SUBJECTS.map(sj => { const x = U.subjStats(sj.k); return `<div class="bar-row" style="--c:${sj.c}"><span>${sj.name}</span><span class="track"><i style="width:${pct(x.right, x.total)}%"></i></span><b>${pct(x.right, x.total)}%</b></div>`; }).join('');
-  const where = P.mode === 'standalone' ? 'इसी डिवाइस के ब्राउज़र में' : P.progressRemote ? 'आपके खाते में (हर डिवाइस पर)' : 'इसी ब्राउज़र में';
+  const where = LOCAL() ? 'इसी डिवाइस के ब्राउज़र में' : P.progressRemote ? 'आपके खाते में (हर डिवाइस पर)' : 'इसी ब्राउज़र में';
   const scales = [[0.9, 'छोटा'], [1, 'सामान्य'], [1.12, 'बड़ा'], [1.25, 'बहुत बड़ा']];
   return `${appbar(`${ic('user')} प्रोफ़ाइल`)}
 <main class="page gutter">
@@ -1131,7 +1141,7 @@ function vProfile() {
     ${P.mode === 'standalone' ? `<div class="field"><span class="lbl">${ic('moon')} थीम</span><div class="chips">${[['system', 'सिस्टम'], ['light', 'लाइट'], ['dark', 'डार्क']].map(([v, l]) => `<button class="chip" data-act="set-theme" data-v="${v}" aria-pressed="${s.set.theme === v}">${l}</button>`).join('')}</div></div>` : ''}
     <p class="small muted" style="margin:0">${ic('lock')} आपकी प्रगति ${where} सहेजी जाती है।</p>
   </section>
-  ${P.isAdmin ? `<a class="act" href="#admin"><span class="ai">${ic('settings')}</span><span>एडमिन पैनल<span class="row-sub">${P.mode === 'standalone' ? 'डेमो: बदलाव इसी ब्राउज़र में' : 'सामग्री, AI प्रश्न, समीक्षा और प्रकाशन'}</span></span>${ic('chev-right', 'chev')}</a>` : ''}
+  ${P.isAdmin ? `<a class="act" href="#admin"><span class="ai">${ic('settings')}</span><span>एडमिन पैनल<span class="row-sub">${LOCAL() ? 'डेमो: बदलाव इसी ब्राउज़र में' : 'सामग्री, AI प्रश्न, समीक्षा और प्रकाशन'}</span></span>${ic('chev-right', 'chev')}</a>` : ''}
   <button class="btn btn-danger" data-act="reset-ask">${ic('trash')} प्रगति रीसेट करें</button>
   <p class="small muted" style="text-align:center;margin:0">MY QUIZ · संस्करण 1.0</p>
 </main>
@@ -1151,6 +1161,7 @@ function vNoAdmin() {
 }
 const ADMIN_ROUTES = new Set(['admin', 'admin-ai', 'admin-review', 'admin-publish', 'admin-bank', 'admin-news', 'admin-days']);
 function cmsNote() {
+  if (P.demo) return `<div class="note">${ic('info')}<div><b>टेस्ट संस्करण:</b> यहाँ किए बदलाव केवल आपके ब्राउज़र में सहेजे जाते हैं — बेझिझक आज़माएँ। असली ऐप पर कोई असर नहीं होगा।</div></div>`;
   if (P.mode === 'standalone') return `<div class="note">${ic('info')}<div><b>डेमो मोड:</b> यहाँ किए बदलाव केवल इसी ब्राउज़र में सहेजे जाते हैं। असली ऐप में यही पैनल सर्वर से जुड़ेगा।</div></div>`;
   if (C.cmsState === 'loading') return `<div class="note">${ic('clock')}<div>ड्राफ़्ट लोड हो रहे हैं…</div></div>`;
   if (C.cmsState === 'slow' || C.cmsState === 'error') return `<div class="note note-warn">${ic('alert')}<div>सर्वर से ड्राफ़्ट अभी नहीं मिल पाए। दिख रही जानकारी पुरानी हो सकती है।</div></div>`;
@@ -1207,7 +1218,7 @@ function vAdminAI() {
   const avail = AI.available();
   return `${adminBar('AI से प्रश्न बनवाएँ')}
 <main class="page gutter">
-  ${avail ? '' : `<div class="note note-warn">${ic('alert')}<div><b>AI अभी जुड़ा नहीं है।</b> ${P.mode === 'standalone' ? 'स्टैंडअलोन संस्करण में <code>window.MYQUIZ_CONFIG = { aiEndpoint: "…" }</code> सेट करें (README देखें)। तब तक "GK प्रश्न बैंक" से प्रश्न हाथ से जोड़ें।' : 'इस दृश्य में Claude उपलब्ध नहीं है।'}</div></div>`}
+  ${avail ? '' : `<div class="note note-warn">${ic('alert')}<div><b>AI अभी जुड़ा नहीं है।</b> ${P.demo ? 'इस टेस्ट संस्करण में AI के लिए claude.ai खाते से साइन इन होना ज़रूरी है। यह टेस्ट (T21) छोड़ सकते हैं।' : P.mode === 'standalone' ? 'स्टैंडअलोन संस्करण में <code>window.MYQUIZ_CONFIG = { aiEndpoint: "…" }</code> सेट करें (README देखें)। तब तक "GK प्रश्न बैंक" से प्रश्न हाथ से जोड़ें।' : 'इस दृश्य में Claude उपलब्ध नहीं है।'}</div></div>`}
   <div class="note">${ic('shield')}<div>AI केवल नीचे दिए स्रोत पाठ से प्रश्न बनाता है। हर प्रश्न प्रकाशन से पहले "सामग्री की जाँच" में मानव समीक्षा से गुज़रता है।</div></div>
   <section class="card" style="display:flex;flex-direction:column;gap:14px">
     <div class="field"><span class="lbl">स्रोत चुनें</span><div class="chips">${[['ca', 'करेंट अफेयर्स'], ['day', 'आज का दिन'], ['text', 'अपना पाठ']].map(([v, l]) => `<button class="chip" data-act="ai-src" data-v="${v}" aria-pressed="${aiForm.src === v}">${l}</button>`).join('')}</div></div>
@@ -1755,7 +1766,7 @@ const FORMS = {
   },
 };
 const BINDS = { aiForm, newsForm, dayForm, onb, pubForm };
-function setBind(path, el) { const [o, k] = path.split('.'); if (BINDS[o]) BINDS[o][k] = el.value; }
+function setBind(path, el) { const [o, k] = path.split('.'); if (BINDS[o]) { BINDS[o][k] = el.value; if (o === 'T') T.save(); } }
 function renderSearch(term) {
   const box = $('#search-results');
   if (!box) return;
@@ -1771,9 +1782,304 @@ function updateApproveBtn(id, el) {
   if (btn) btn.disabled = !boxes.every(b => b.checked);
 }
 
+
+// ───────────────────────────── tester build (demo) ─────────────────────────────
+const TESTS = [
+  { g: 'होम और शुरुआत', id: 'T01', to: 'home', t: 'नाम और लक्ष्य परीक्षा सहेजें', do: 'होम पर “अपनी तैयारी को निजी बनाएँ” कार्ड में नाम लिखें, लक्ष्य परीक्षा और रोज़ का लक्ष्य चुनकर “सहेजें” दबाएँ।', exp: 'ऊपर “नमस्कार, आपका नाम!” दिखे, कार्ड हट जाए और प्रोफ़ाइल में नाम व परीक्षा दिखें।' },
+  { g: 'होम और शुरुआत', id: 'T02', to: 'home', t: 'दैनिक क्विज पूरा करें', do: 'होम पर “शुरू करें” दबाएँ और सभी 10 प्रश्न हल करें।', exp: 'हर उत्तर पर सही/गलत रंग और व्याख्या दिखे; अंत में परिणाम आए; होम की रिंग में गिनती बढ़े और “दैनिक क्विज पूरा” लिखा आए।' },
+  { g: 'होम और शुरुआत', id: 'T03', to: 'home', t: 'स्ट्रीक और सूचनाएँ', do: 'आज कम से कम 5 प्रश्न हल करें, फिर होम पर घंटी (सूचनाएँ) दबाकर हर सूचना खोलें।', exp: '“1 दिन की स्ट्रीक” दिखे; हर सूचना सही स्क्रीन खोले।' },
+  { g: 'क्विज', id: 'T04', to: 'quiz', t: 'विषय क्विज (अभ्यास मोड)', do: '“क्विज” में कोई विषय चुनकर 10 प्रश्न हल करें; बीच में “पिछला प्रश्न” भी दबाएँ।', exp: 'उसी विषय के प्रश्न आएँ; दिया गया उत्तर बदला न जा सके; विषय सूची में प्रगति और सटीकता अपडेट हो।' },
+  { g: 'क्विज', id: 'T05', to: 'quiz', t: 'समयबद्ध मोड', do: '“समयबद्ध” चुनें, कोई विषय शुरू करें और एक प्रश्न पर 30 सेकंड पूरे होने दें।', exp: 'टाइमर घटता दिखे और आख़िरी 10 सेकंड में लाल हो; समय ख़त्म होने पर “समय समाप्त!” और सही उत्तर दिखे।' },
+  { g: 'क्विज', id: 'T06', to: 'bookmarks', t: 'बुकमार्क', do: 'क्विज में 2 प्रश्न “बुकमार्क” करें, फिर नीचे “बुकमार्क” टैब खोलें और “इन प्रश्नों का अभ्यास करें” दबाएँ।', exp: 'दोनों प्रश्न सूची में दिखें, “हटाएँ” काम करे और अभ्यास में वही प्रश्न आएँ।' },
+  { g: 'क्विज', id: 'T07', to: 'home', t: 'गलत प्रश्नों का दोहराव', do: 'क्विज में जान-बूझकर 2–3 गलत उत्तर दें, फिर होम पर “प्रश्न दोहराव के लिए तैयार” कार्ड दबाएँ।', exp: 'वही गलत हुए प्रश्न दोबारा आएँ; सही करने पर कार्ड की गिनती घटे।' },
+  { g: 'क्विज', id: 'T08', to: 'quiz', t: 'प्रश्न खोज', do: 'क्विज स्क्रीन पर ऊपर दाएँ खोज आइकन दबाकर “संविधान” या “1857” लिखें और कोई परिणाम खोलें।', exp: 'मिलते-जुलते प्रश्न दिखें और चुना गया प्रश्न खुल जाए।' },
+  { g: 'क्विज', id: 'T09', to: 'quiz', t: 'त्रुटि बताएँ और शेयर', do: 'किसी प्रश्न पर “त्रुटि बताएँ” से रिपोर्ट भेजें, फिर “शेयर” दबाएँ।', exp: '“धन्यवाद” संदेश आए; रिपोर्ट एडमिन → “सामग्री की जाँच करें” → “त्रुटि रिपोर्ट” में दिखे; शेयर पर टेक्स्ट कॉपी या शेयर हो।' },
+  { g: 'करेंट अफेयर्स और आज का दिन', id: 'T10', to: 'ca', t: 'करेंट अफेयर्स', do: '“Current Affairs” खोलें, कोई श्रेणी चुनें, एक ख़बर खोलें, फिर “सहेजें” और “इस ख़बर से प्रश्न” आज़माएँ।', exp: 'फ़िल्टर सही ख़बरें दिखाए; ख़बर में मुख्य तथ्य और स्रोत लिंक हों; उसी ख़बर पर आधारित प्रश्न खुलें।' },
+  { g: 'करेंट अफेयर्स और आज का दिन', id: 'T11', to: 'ca', t: 'करेंट अफेयर्स क्विज', do: 'Current Affairs में ऊपर “करेंट अफेयर्स क्विज” दबाकर पूरा करें।', exp: 'हाल की ख़बरों से प्रश्न आएँ और परिणाम में सही गिनती दिखे।' },
+  { g: 'करेंट अफेयर्स और आज का दिन', id: 'T12', to: 'today', t: 'आज का दिन', do: '“आज का दिन” खोलें; तीर से तारीख़ बदलें, ऊपर दाएँ सूची आइकन से कोई महीना चुनें, फिर “इस दिन से जुड़े प्रश्न देखें” दबाएँ।', exp: 'हर तारीख़ पर सही दिवस (या “कोई दिवस दर्ज नहीं”) दिखे; एक दिन में दो दिवस हों तो दोनों के बटन हों; प्रश्न उसी दिवस से जुड़े हों।' },
+  { g: 'अभ्यास परीक्षा (मॉक टेस्ट)', id: 'T13', to: 'mock', t: 'मॉक टेस्ट शुरू करें', do: '“सामान्य ज्ञान मिनी मॉक – 1” शुरू करें; कुछ उत्तर दें, 2 प्रश्न “समीक्षा हेतु चिह्नित” करें और ऊपर दाएँ पैलेट से किसी प्रश्न पर जाएँ।', exp: 'टाइमर चले; पैलेट के रंग सही हों (हरा = उत्तर दिया, लाल = छोड़ा, बैंगनी = चिह्नित)।' },
+  { g: 'अभ्यास परीक्षा (मॉक टेस्ट)', id: 'T14', to: 'mock', t: 'परीक्षा छोड़कर लौटना', do: 'परीक्षा के बीच ऊपर बाएँ ✕ से “बाहर जाएँ”, फिर “अभ्यास परीक्षा” में “जारी रखें” दबाएँ।', exp: 'वहीं से परीक्षा खुले, पिछले उत्तर बने रहें और समय चलता रहे।' },
+  { g: 'अभ्यास परीक्षा (मॉक टेस्ट)', id: 'T15', to: 'mock', t: 'सबमिट और परिणाम', do: 'परीक्षा सबमिट करें और परिणाम देखें।', exp: 'सही उत्तर पर +2 और गलत पर −0.5 सही गिने जाएँ; विषयवार प्रदर्शन और समाधान दिखें; “पिछले प्रयास” में यह प्रयास जुड़े।' },
+  { g: 'प्रोफ़ाइल और सेटिंग्स', id: 'T16', to: 'profile', t: 'अक्षरों का आकार और रोज़ का लक्ष्य', do: 'प्रोफ़ाइल में अक्षरों का आकार “बड़ा” और रोज़ का लक्ष्य 20 करें; फिर होम और क्विज देखें।', exp: 'हर स्क्रीन पर अक्षर बड़े हों पर कुछ कटे या एक-दूसरे पर न चढ़ें; होम की रिंग में “/ 20 प्रश्न” दिखे।' },
+  { g: 'प्रोफ़ाइल और सेटिंग्स', id: 'T17', to: 'home', t: 'डार्क मोड', do: 'फ़ोन की सेटिंग में डार्क मोड चालू करके ऐप की मुख्य स्क्रीनें देखें।', exp: 'सभी स्क्रीनें पढ़ने योग्य हों; कहीं अदृश्य टेक्स्ट या चुभने वाली सफ़ेद पट्टी न हो।' },
+  { g: 'एडमिन पैनल', id: 'T18', to: 'admin-news', t: 'समाचार जोड़कर प्रकाशित करें', do: 'एडमिन → “आज के समाचार देखें” में नया समाचार भरकर भेजें; “सामग्री की जाँच करें” में तीनों बिंदु चुनकर स्वीकृत करें; “प्रकाशित करें” से प्रकाशित करें।', exp: 'तीनों बिंदु चुने बिना “स्वीकृत करें” बंद रहे; प्रकाशन के बाद समाचार Current Affairs में सबसे ऊपर दिखे।' },
+  { g: 'एडमिन पैनल', id: 'T19', to: 'admin-bank', t: 'नया प्रश्न जोड़ें या संपादित करें', do: 'एडमिन → “GK प्रश्न बैंक” में “नया प्रश्न जोड़ें” या किसी प्रश्न को “संपादित करें”; फिर समीक्षा और प्रकाशन करें।', exp: 'अधूरा फ़ॉर्म सहेजा न जाए; प्रकाशन के बाद बदलाव क्विज में दिखे।' },
+  { g: 'एडमिन पैनल', id: 'T20', to: 'admin-bank', t: 'प्रश्न छिपाएँ', do: 'प्रश्न बैंक में किसी मूल प्रश्न पर “छिपाएँ” दबाएँ।', exp: 'वह प्रश्न क्विज और खोज में न आए; “प्रकाशित करें” की सूची से हटाने पर वापस दिखे।' },
+  { g: 'एडमिन पैनल', id: 'T21', to: 'admin-ai', t: 'AI से प्रश्न बनवाएँ', do: 'एडमिन → “AI से प्रश्न बनवाएँ” में कोई ख़बर चुनकर “प्रश्न बनाएँ” दबाएँ (अनुमति माँगी जाए तो दें)।', exp: 'कुछ सेकंड में हिंदी प्रश्न बनें, संपादित किए जा सकें और “समीक्षा में भेजें” से जाँच सूची में पहुँचें। AI उपलब्ध न हो तो इसे “छोड़ें”।' },
+  { g: 'सामान्य', id: 'T22', to: 'home', t: 'नेविगेशन और बैक बटन', do: 'अलग-अलग स्क्रीनों पर जाएँ; फ़ोन/ब्राउज़र का बैक बटन और ऐप का ← बटन दबाएँ।', exp: 'हर बार सही पिछली स्क्रीन खुले; कोई ख़ाली या अटकी स्क्रीन न दिखे।' },
+  { g: 'सामान्य', id: 'T23', to: 'home', t: 'भाषा और पढ़ने में आसानी', do: 'पूरे ऐप में हिंदी पाठ, मात्राएँ और वर्तनी ध्यान से देखें।', exp: 'कहीं टूटे अक्षर, गलत वर्तनी या तथ्य की गलती न हो। मिले तो “सामग्री में गलती” प्रकार से बग बताएँ।' },
+];
+const SEVS = [['critical', 'गंभीर', 'ऐप रुक गया, डेटा गया या आगे नहीं बढ़ सकते'], ['major', 'बड़ी', 'कोई फ़ीचर काम नहीं करता'], ['minor', 'छोटी', 'दिखावट या छोटी गड़बड़'], ['idea', 'सुझाव', 'सुधार का विचार']];
+const BTYPES = [['bug', 'बग'], ['ui', 'डिज़ाइन / UI'], ['content', 'सामग्री में गलती'], ['idea', 'सुझाव']];
+const SEV_EN = { critical: 'Critical', major: 'Major', minor: 'Minor', idea: 'Suggestion' };
+const TYPE_EN = { bug: 'Bug', ui: 'UI/Design', content: 'Content error', idea: 'Idea' };
+const SEV_CLS = { critical: 'sev-c', major: 'sev-ma', minor: 'sev-mi', idea: 'sev-s' };
+const ROUTE_LABEL = { home: 'होम', quiz: 'क्विज – विषय चुनें', play: 'प्रश्न स्क्रीन', result: 'परिणाम', ca: 'Current Affairs', today: 'आज का दिन', mock: 'अभ्यास परीक्षा', exam: 'मॉक परीक्षा', 'exam-result': 'परीक्षा परिणाम', bookmarks: 'बुकमार्क', profile: 'प्रोफ़ाइल', admin: 'एडमिन डैशबोर्ड', 'admin-ai': 'एडमिन · AI प्रश्न', 'admin-review': 'एडमिन · सामग्री की जाँच', 'admin-publish': 'एडमिन · प्रकाशन', 'admin-bank': 'एडमिन · प्रश्न बैंक', 'admin-news': 'एडमिन · समाचार', 'admin-days': 'एडमिन · आज का दिन', test: 'टेस्टर केंद्र', 'test-inbox': 'टेस्टर इनबॉक्स' };
+const fmtStamp = ts => { const d = new Date(ts); return `${fmtDate(isoOf(d))}, ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const waLink = text => 'https://wa.me/?text=' + encodeURIComponent(text);
+const T = {
+  name: String(LS.get('test.name', '') || '').slice(0, 40),
+  res: (() => { const r = LS.get('test.results', {}); return r && typeof r === 'object' && !Array.isArray(r) ? r : {}; })(),
+  bugs: (() => { const b = LS.get('test.bugs', []); return Array.isArray(b) ? b.filter(x => x && x.id) : []; })(),
+  log: [], errors: [], inbox: [], inboxState: 'idle', open: '', shared: false, denied: false, timer: 0,
+  save() { LS.set('test.name', this.name); LS.set('test.results', this.res); LS.set('test.bugs', this.bugs); this.push(); },
+  note(d) { this.log.push(String(d).slice(0, 40)); if (this.log.length > 30) this.log.shift(); },
+  // Testers with write access (the owner, or someone invited as an editor) also send results and
+  // reports to the shared inbox; everyone else shares them by WhatsApp or copy.
+  push() {
+    if (!P.demo || !P.db || !P.uid || this.denied) return;
+    if (!this.bugs.length && !Object.keys(this.res).length) return;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(async () => {
+      try {
+        await P.db.doc('feedback/' + P.uid).set(clone({ name: this.name, build: BUILD, device: deviceInfo(), results: this.res, items: this.bugs.slice(-80).map(slimBug), updatedAt: Date.now() }));
+        this.shared = true;
+        let changed = false;
+        for (const b of this.bugs) if (!b.inbox) { b.inbox = true; changed = true; }
+        if (changed) { LS.set('test.bugs', this.bugs); if (route === 'test') scheduleRender(); }
+      } catch (e) {
+        this.shared = false;
+        if (e && ['invalid_argument', 'not_granted', 'revoked', 'capability_disabled', 'capability_removed'].includes(e.code)) this.denied = true;
+      }
+    }, 1200);
+  },
+};
+BINDS.T = T;
+const bugForm = { sev: 'major', type: 'bug', caseId: '', ctx: '', route: '' };
+const slimBug = b => ({ id: b.id, n: b.n, title: b.title, what: b.what, exp: b.exp, sev: b.sev, type: b.type, caseId: b.caseId, screen: b.screen, at: b.at, device: b.device, steps: b.steps, errors: b.errors, tester: b.tester, build: b.build });
+function deviceInfo() {
+  const ua = navigator.userAgent || '';
+  const m = re => { const x = re.exec(ua); return x ? x[1] : ''; };
+  const os = m(/Android ([\d.]+)/) ? 'Android ' + m(/Android ([\d.]+)/)
+    : m(/(?:iPhone|CPU) OS ([\d_]+)/) ? 'iOS ' + m(/(?:iPhone|CPU) OS ([\d_]+)/).replace(/_/g, '.')
+      : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'OS?';
+  const br = m(/EdgA?\/(\d+)/) ? 'Edge ' + m(/EdgA?\/(\d+)/)
+    : m(/SamsungBrowser\/(\d+)/) ? 'Samsung Internet ' + m(/SamsungBrowser\/(\d+)/)
+      : m(/(?:Chrome|CriOS)\/(\d+)/) ? 'Chrome ' + m(/(?:Chrome|CriOS)\/(\d+)/)
+        : m(/(?:Firefox|FxiOS)\/(\d+)/) ? 'Firefox ' + m(/(?:Firefox|FxiOS)\/(\d+)/)
+          : m(/Version\/([\d.]+).*Safari/) ? 'Safari ' + m(/Version\/([\d.]+).*Safari/) : 'Browser?';
+  const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return `${os} · ${br} · ${window.innerWidth}×${window.innerHeight} @${Math.round((window.devicePixelRatio || 1) * 10) / 10}x · ${dark ? 'Dark' : 'Light'} · Text ${Math.round((Number(U.s.set.scale) || 1) * 100)}%`;
+}
+function bugContext() {
+  let ctx = `${ROUTE_LABEL[route] || route} (#${route})`;
+  if (route === 'play' && S && S.qs[S.i]) { const q = S.qs[S.i]; ctx += ` · प्रश्न ${S.i + 1}/${S.qs.length} [${q.id}] ${q.q.slice(0, 90)}`; }
+  if (route === 'exam' && E) { const q = M().byId.get(E.qs[E.i]); ctx += ` · प्रश्न ${E.i + 1}/${E.qs.length}${q ? ` [${q.id}] ${q.q.slice(0, 90)}` : ''}`; }
+  if (route === 'today') ctx += ` · तारीख़ ${dayCursor || todayISO()}`;
+  if (route === 'ca' && caCat) ctx += ` · श्रेणी: ${caCat}`;
+  return ctx;
+}
+function bugText(b) {
+  const tc = b.caseId ? TESTS.find(x => x.id === b.caseId) : null;
+  return [
+    `🐞 MY QUIZ बग #${b.n} — ${SEV_EN[b.sev] || b.sev} · ${TYPE_EN[b.type] || b.type}`,
+    `शीर्षक: ${b.title}`,
+    b.tester ? `टेस्टर: ${b.tester}` : null,
+    `स्क्रीन: ${b.screen}`,
+    tc ? `टेस्ट केस: ${tc.id} ${tc.t}` : null,
+    '',
+    `क्या हुआ: ${b.what}`,
+    b.exp ? `क्या होना चाहिए था: ${b.exp}` : null,
+    '',
+    `डिवाइस: ${b.device}`,
+    `समय: ${fmtStamp(b.at)} · ${b.build}`,
+    b.steps ? `आख़िरी क़दम: ${b.steps}` : null,
+    b.errors && b.errors.length ? `तकनीकी त्रुटियाँ: ${b.errors.join(' | ')}` : null,
+  ].filter(x => x !== null).join('\n').replace(/\n{3,}/g, '\n\n');
+}
+function fullReportText() {
+  const by = st => TESTS.filter(t => T.res[t.id] === st);
+  const pass = by('pass'), fail = by('fail'), skip = by('skip'), left = TESTS.filter(t => !T.res[t.id]);
+  return [
+    `🧪 MY QUIZ टेस्ट रिपोर्ट (${BUILD})`,
+    `टेस्टर: ${T.name || '—'} · ${fmtStamp(Date.now())}`,
+    `डिवाइस: ${deviceInfo()}`,
+    '',
+    `टेस्ट केस: ${TESTS.length - left.length}/${TESTS.length} — ✅ ${pass.length} ठीक · ❌ ${fail.length} गड़बड़ · ⏭ ${skip.length} छोड़े`,
+    ...fail.map(t => `❌ ${t.id} ${t.t}`),
+    ...skip.map(t => `⏭ ${t.id} ${t.t}`),
+    left.length ? `बाकी: ${left.map(t => t.id).join(', ')}` : null,
+    '',
+    `बग रिपोर्ट (${T.bugs.length}):`,
+    ...T.bugs.map(b => `#${b.n} [${SEV_EN[b.sev] || b.sev} · ${TYPE_EN[b.type] || b.type}] ${b.title}\n   स्क्रीन: ${b.screen}\n   क्या हुआ: ${b.what}${b.exp ? `\n   अपेक्षित: ${b.exp}` : ''}`),
+    T.bugs.length ? null : '—',
+  ].filter(x => x !== null).join('\n');
+}
+function openBug(caseId = '') {
+  bugForm.caseId = caseId; bugForm.ctx = bugContext(); bugForm.route = route;
+  const tc = TESTS.find(x => x.id === caseId);
+  openSheet(`${sheetHead(`${ic('bug')} बग रिपोर्ट करें`)}
+  <form data-form="bug" style="display:flex;flex-direction:column;gap:12px">
+    ${tc ? `<div class="note">${ic('clipboard')}<div><b>${tc.id}:</b> ${esc(tc.t)}<br><span class="small muted">अपेक्षित: ${esc(tc.exp)}</span></div></div>` : ''}
+    <div class="field"><label for="bg-title">छोटा शीर्षक <span class="muted small">(Short title)</span></label><input class="input" id="bg-title" maxlength="120" value="${tc ? esc(tc.t + ' — ठीक से काम नहीं किया') : ''}" placeholder="जैसे: टाइमर ख़त्म होने पर अगला प्रश्न नहीं खुला"></div>
+    <div class="field"><span class="lbl">कितनी गंभीर? <span class="muted small">(Severity)</span></span><div class="chips wrap">${SEVS.map(([k, l]) => `<button type="button" class="chip" data-act="bug-sev" data-v="${k}" aria-pressed="${bugForm.sev === k}">${l}</button>`).join('')}</div><span class="small muted" id="bg-sev-help">${esc((SEVS.find(x => x[0] === bugForm.sev) || [])[2] || '')}</span></div>
+    <div class="field"><span class="lbl">प्रकार <span class="muted small">(Type)</span></span><div class="chips wrap">${BTYPES.map(([k, l]) => `<button type="button" class="chip" data-act="bug-type" data-v="${k}" aria-pressed="${bugForm.type === k}">${l}</button>`).join('')}</div></div>
+    <div class="field"><label for="bg-what">क्या हुआ? <span class="muted small">(What happened)</span></label><textarea class="textarea" id="bg-what" rows="3" maxlength="1500" placeholder="आपने क्या किया और स्क्रीन पर क्या दिखा"></textarea></div>
+    <div class="field"><label for="bg-exp">क्या होना चाहिए था? <span class="muted small">(Expected)</span></label><textarea class="textarea" id="bg-exp" rows="2" maxlength="800" style="min-height:70px" placeholder="आपके हिसाब से सही व्यवहार"></textarea></div>
+    <div class="note">${ic('info')}<div class="small">अपने-आप जुड़ेगा: स्क्रीन (<b>${esc(bugForm.ctx)}</b>), डिवाइस की जानकारी और आपके आख़िरी क़दम${T.errors.length ? `, साथ में ${T.errors.length} तकनीकी त्रुटि` : ''}। स्क्रीनशॉट हो तो रिपोर्ट के साथ भेज दें।</div></div>
+    <p class="small" id="bg-err" style="margin:0;color:var(--bad)" role="alert"></p>
+    <button class="btn btn-cta btn-block" type="submit">${ic('check')} रिपोर्ट सहेजें</button>
+  </form>`, { label: 'बग रिपोर्ट करें' });
+}
+function openBugSent(b) {
+  openSheet(`${sheetHead('रिपोर्ट सहेजी गई')}
+  <p style="margin:0">बग #${b.n} आपके फ़ोन में सहेज ली गई है। अब इसे ऐप टीम को भेजें:</p>
+  <div class="btnrow"><a class="btn btn-cta" href="${esc(waLink(bugText(b)))}" target="_blank" rel="noopener noreferrer" data-act="bug-wa" data-id="${esc(b.id)}">${ic('send')} WhatsApp पर भेजें</a><button class="btn btn-outline" data-act="bug-copy" data-id="${esc(b.id)}">${ic('copy')} टेक्स्ट कॉपी करें</button></div>
+  <p class="small muted" style="margin:0">${P.db && P.uid && !T.denied ? 'यह रिपोर्ट ऐप के टेस्टर इनबॉक्स में भी भेजी जा रही है।' : 'चाहें तो सभी रिपोर्ट अंत में एक साथ भेजें: टेस्ट सूची → “पूरी रिपोर्ट भेजें”।'}</p>
+  <button class="btn btn-grey btn-block" data-act="sheet-close">ठीक है</button>`, { label: 'रिपोर्ट सहेजी गई' });
+}
+function markCase(id, st) {
+  T.res[id] = st;
+  T.save();
+  const next = TESTS.find(t => !T.res[t.id]);
+  T.open = next ? next.id : '';
+  toast(st === 'pass' ? `${id} ठीक चला` : `${id} छोड़ा गया`);
+  render();
+}
+function renderDemoStrip() {
+  if (!DEMO) return;
+  const root = $('#demo-root');
+  if (!root) return;
+  const done = TESTS.filter(t => T.res[t.id]).length;
+  root.innerHTML = `<div class="demo-strip"><div class="demo-in gutter"><span class="demo-tag">${ic('flask')}<span>टेस्ट संस्करण</span></span><span class="demo-sp"></span><button class="demo-btn" data-act="bug-open" aria-label="बग बताएँ">${ic('bug')} बग बताएँ${T.errors.length ? '<span class="demo-dot" aria-hidden="true"></span>' : ''}</button><a class="demo-btn" href="#test" aria-label="टेस्ट सूची: ${TESTS.length} में से ${done} टेस्ट हुए">${ic('clipboard')} टेस्ट <b class="tnum">${done}/${TESTS.length}</b></a></div></div>`;
+}
+function tcHtml(t) {
+  const st = T.res[t.id];
+  const label = st === 'pass' ? 'ठीक' : st === 'fail' ? 'गड़बड़' : st === 'skip' ? 'छोड़ा' : 'बाकी';
+  return `<details class="tcase" data-tc="${t.id}" ${T.open === t.id ? 'open' : ''}><summary><span class="tc-id">${t.id}</span><span class="tc-title">${esc(t.t)}</span><span class="tc-st ${st ? 'tc-' + st : ''}">${label}</span></summary>
+  <div class="tc-body"><p><b>क्या करें:</b> ${esc(t.do)}</p><p><b>अपेक्षित परिणाम:</b> ${esc(t.exp)}</p>
+  <div class="btnrow"><a class="btn btn-sm btn-outline" href="#${t.to}">${ic('arrow-right')} स्क्रीन खोलें</a><button class="btn btn-sm btn-cta" data-act="tc-pass" data-id="${t.id}">${ic('check')} ठीक चला</button><button class="btn btn-sm btn-danger" data-act="tc-fail" data-id="${t.id}">${ic('x')} गड़बड़ है</button><button class="btn btn-sm btn-grey" data-act="tc-skip" data-id="${t.id}">छोड़ें</button></div></div></details>`;
+}
+function bugRow(b, own = true) {
+  const sev = (SEVS.find(x => x[0] === b.sev) || [b.sev, b.sev])[1];
+  const typ = (BTYPES.find(x => x[0] === b.type) || [b.type, b.type])[1];
+  return `<div class="review-item"><div class="draft-head"><span class="tag ${SEV_CLS[b.sev] || ''}">${esc(sev)}</span><span class="tag">${esc(typ)}</span><span class="small muted">#${esc(b.n)} · ${relTime(b.at)}${own && b.inbox ? ' · इनबॉक्स में भेजी गई' : ''}${!own && b.tester ? ' · ' + esc(b.tester) : ''}</span></div>
+  <b>${esc(b.title)}</b><span class="small muted">${esc(b.screen)}</span><span class="small">${esc(b.what)}</span>${b.exp ? `<span class="small">अपेक्षित: ${esc(b.exp)}</span>` : ''}${!own && b.steps ? `<span class="small muted">आख़िरी क़दम: ${esc(b.steps)}</span>` : ''}${!own && b.device ? `<span class="small muted">${esc(b.device)}</span>` : ''}
+  ${own ? `<div class="btnrow" style="gap:14px"><a class="link" href="${esc(waLink(bugText(b)))}" target="_blank" rel="noopener noreferrer" data-act="bug-wa" data-id="${esc(b.id)}">${ic('send')} WhatsApp</a><button class="link" data-act="bug-copy" data-id="${esc(b.id)}">${ic('copy')} कॉपी</button><button class="link" style="color:var(--bad)" data-act="bug-del" data-id="${esc(b.id)}">${ic('trash')} हटाएँ</button></div>` : ''}</div>`;
+}
+function vTest() {
+  if (!DEMO) return redirect('home');
+  const total = TESTS.length, done = TESTS.filter(t => T.res[t.id]).length;
+  const n = st => TESTS.filter(t => T.res[t.id] === st).length;
+  const groups = uniq(TESTS.map(t => t.g));
+  const long = fullReportText().length > 6000;
+  return `${appbar(`${ic('clipboard')} टेस्टर केंद्र`, { back: 'home' })}
+<main class="page gutter">
+  <section class="card" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="font-size:1.15rem;font-weight:800;line-height:1.35">धन्यवाद! आप MY QUIZ का टेस्ट संस्करण चला रहे हैं।</h2>
+    <p class="small muted" style="margin:0">हर फ़ीचर बेझिझक आज़माएँ, एडमिन पैनल भी। आपके सारे बदलाव केवल आपके ब्राउज़र में रहते हैं; असली ऐप पर कोई असर नहीं होता।</p>
+    <ol class="small" style="margin:0;padding-left:1.25em;display:flex;flex-direction:column;gap:4px">
+      <li>नीचे अपना नाम लिखें।</li>
+      <li>हर टेस्ट खोलें और बताए गए क़दम करें (“स्क्रीन खोलें” से सीधे वहाँ जाएँ)।</li>
+      <li>ठीक चले तो “ठीक चला” दबाएँ; गड़बड़ हो तो “गड़बड़ है” दबाकर बग लिखें। किसी भी स्क्रीन से ऊपर पीली पट्टी में “बग बताएँ” भी दबा सकते हैं।</li>
+      <li>अंत में “पूरी रिपोर्ट भेजें” से सब एक साथ भेजें।</li>
+    </ol>
+    <div class="field"><label for="t-name">आपका नाम (टेस्टर)</label><input class="input" id="t-name" data-bind="T.name" value="${esc(T.name)}" maxlength="40" placeholder="जैसे: प्रिया" autocomplete="name"></div>
+  </section>
+  <div class="stats tstats"><div class="stat"><b class="tnum">${done}/${total}</b><span>टेस्ट हुए</span></div><div class="stat s-ok"><b>${n('pass')}</b><span>ठीक</span></div><div class="stat s-bad"><b>${n('fail')}</b><span>गड़बड़</span></div><div class="stat"><b>${T.bugs.length}</b><span>बग</span></div></div>
+  <div class="btnrow"><a class="btn btn-cta" href="${esc(waLink(fullReportText()))}" target="_blank" rel="noopener noreferrer" data-act="report-wa">${ic('send')} पूरी रिपोर्ट WhatsApp पर</a><button class="btn btn-outline" data-act="report-copy">${ic('copy')} पूरी रिपोर्ट कॉपी करें</button></div>
+  ${long ? `<p class="small muted" style="margin:-6px 0 0">रिपोर्ट लंबी है। WhatsApp में कट जाए तो “कॉपी करें” से भेजें।</p>` : ''}
+  ${groups.map(g => `<h3 class="tgroup">${esc(g)}</h3>${TESTS.filter(t => t.g === g).map(tcHtml).join('')}`).join('')}
+  <section style="display:flex;flex-direction:column;gap:10px">
+    <div class="sec-head"><h2 class="sec-title">${ic('bug')} मेरी बग रिपोर्ट (${T.bugs.length})</h2><button class="btn btn-sm btn-outline" data-act="bug-open">${ic('plus')} नई रिपोर्ट</button></div>
+    ${T.bugs.length ? `<div class="list">${T.bugs.slice().reverse().map(b => bugRow(b)).join('')}</div>` : `<div class="card">${emptyState('bug', 'अभी कोई बग रिपोर्ट नहीं', 'गड़बड़ दिखे तो ऊपर पीली पट्टी में “बग बताएँ” दबाएँ।')}</div>`}
+  </section>
+  ${P.editor ? `<a class="act" href="#test-inbox"><span class="ai">${ic('inbox')}</span><span>टेस्टर इनबॉक्स<span class="row-sub">सभी टेस्टरों की सीधे आई रिपोर्ट — केवल मालिक/संपादक देख सकते हैं</span></span>${ic('chev-right', 'chev')}</a>` : ''}
+  <section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1.05rem">${ic('rotate')} नए सिरे से टेस्ट करें</h2><p class="small muted" style="margin:0">प्रगति, बुकमार्क, मॉक इतिहास और एडमिन बदलाव हटाकर ऐप को पहली बार जैसा बनाएँ। आपकी टेस्ट सूची और बग रिपोर्ट बनी रहेंगी।</p><button class="btn btn-danger" data-act="demo-reset-ask">${ic('trash')} ऐप डेटा रीसेट करें</button></section>
+  <p class="small muted" style="text-align:center;margin:0">MY QUIZ · ${esc(BUILD)}</p>
+</main>
+${bottomNav('')}`;
+}
+function vTestInbox() {
+  if (!DEMO) return redirect('home');
+  if (!P.editor) return `${appbar('टेस्टर इनबॉक्स', { back: 'test' })}<main class="page gutter"><div class="card">${emptyState('lock', 'यह इनबॉक्स केवल ऐप के मालिक या संपादक के लिए है', P.ready ? '' : 'पहुँच जाँची जा रही है…')}</div></main>`;
+  const testers = T.inbox.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const cards = testers.map(x => {
+    const vals = Object.values(x.results);
+    const cnt = st => vals.filter(v => v === st).length;
+    const failed = TESTS.filter(t => x.results[t.id] === 'fail').map(t => t.id);
+    return `<section class="card" style="display:flex;flex-direction:column;gap:10px">
+      <div class="inbox-head"><span class="avatar" style="width:40px;height:40px;background:var(--navy);border:0">${esc(initial(x.name || 'T'))}</span><span class="row-main"><span class="row-title">${esc(x.name || 'बिना नाम का टेस्टर')}</span><span class="row-sub">${relTime(x.updatedAt)} · ${esc(x.build || '')}</span></span></div>
+      ${x.device ? `<span class="small muted">${esc(x.device)}</span>` : ''}
+      <div class="chips wrap"><span class="chip">${cnt('pass') + cnt('fail') + cnt('skip')}/${TESTS.length} टेस्ट</span><span class="chip">${cnt('pass')} ठीक</span><span class="chip">${cnt('fail')} गड़बड़${failed.length ? ': ' + esc(failed.join(', ')) : ''}</span><span class="chip">${x.items.length} बग</span></div>
+      ${x.items.length ? `<div class="list">${x.items.slice().reverse().map(b => bugRow(b, false)).join('')}</div>` : ''}
+    </section>`;
+  }).join('');
+  return `${appbar(`${ic('inbox')} टेस्टर इनबॉक्स`, { back: 'test' })}
+<main class="page gutter">
+  <div class="note">${ic('info')}<div>यहाँ उन टेस्टरों की रिपोर्ट और टेस्ट नतीजे दिखते हैं जिन्हें आपने इस डेमो पर <b>संपादक (Editor)</b> की पहुँच दी है। WhatsApp या कॉपी से भेजी रिपोर्ट यहाँ नहीं आतीं।</div></div>
+  ${testers.length ? `<button class="btn btn-outline" data-act="inbox-copy">${ic('copy')} सारी रिपोर्ट कॉपी करें</button>` : ''}
+  ${T.inboxState === 'loading' ? skeletonCards(2) : T.inboxState === 'error' ? `<div class="note note-warn">${ic('alert')}<div>इनबॉक्स अभी लोड नहीं हो सका।</div></div>` : cards || `<div class="card">${emptyState('inbox', 'अभी कोई रिपोर्ट नहीं आई', '')}</div>`}
+</main>`;
+}
+function subscribeInbox() {
+  if (!P.demo || !P.db || !P.editor) return;
+  T.inboxState = 'loading';
+  try {
+    P.db.collection('feedback').onSnapshot(snap => {
+      T.inbox = snap.docs.map(d => {
+        const x = d.data() || {};
+        return { uid: d.id, name: String(x.name || ''), build: String(x.build || ''), device: String(x.device || ''), results: x.results && typeof x.results === 'object' && !Array.isArray(x.results) ? x.results : {}, items: Array.isArray(x.items) ? x.items.filter(i => i && typeof i === 'object') : [], updatedAt: Number(x.updatedAt) || 0 };
+      });
+      T.inboxState = 'ok';
+      if (route === 'test-inbox' || route === 'test') scheduleRender();
+    }, () => { T.inboxState = 'error'; if (route === 'test-inbox') scheduleRender(); });
+  } catch { T.inboxState = 'error'; }
+}
+// Two example AI drafts so the review → approve → publish flow can be tried right away.
+function seedDemo() {
+  if (!P.demo || LS.get('demo.seeded', false)) return;
+  LS.set('demo.seeded', true);
+  if (C.drafts.length) return;
+  const now = Date.now();
+  const src = 'गोवा में 57वाँ अंतरराष्ट्रीय फ़िल्म महोत्सव (IFFI) शुरू\nतारीख़: 20 नवंबर 2026\nभारत का 57वाँ अंतरराष्ट्रीय फ़िल्म महोत्सव 20 से 28 नवंबर 2026 तक गोवा में आयोजित हो रहा है। इस बार की थीम Stories Without Borders है और उद्घाटन फ़िल्म पोलिश निर्देशक पावेल पावलिकोव्स्की की Fatherland है।\n• कंट्री ऑफ़ ऑनर: स्पेन';
+  C.drafts.push(
+    { id: 'ex1', type: 'q', status: 'draft', origin: 'ai', note: 'उदाहरण ड्राफ़्ट', source: src, createdAt: now, updatedAt: now, data: { id: 'qex1iffi', s: 'ca', t: 'कला एवं संस्कृति', d: 1, n: 'n2611-iffi', q: '57वें भारतीय अंतरराष्ट्रीय फ़िल्म महोत्सव (IFFI) 2026 में कंट्री ऑफ़ ऑनर कौन-सा देश है?', o: ['फ़्रांस', 'स्पेन', 'जापान', 'इटली'], a: 1, e: '57वें IFFI (20–28 नवंबर 2026, गोवा) में स्पेन को कंट्री ऑफ़ ऑनर बनाया गया है।' } },
+    { id: 'ex2', type: 'q', status: 'draft', origin: 'ai', note: 'उदाहरण ड्राफ़्ट', source: src, createdAt: now + 1, updatedAt: now + 1, data: { id: 'qex2iffi', s: 'ca', t: 'कला एवं संस्कृति', d: 2, n: 'n2611-iffi', q: 'IFFI 2026 की उद्घाटन फ़िल्म Fatherland के निर्देशक पावेल पावलिकोव्स्की किस देश से हैं?', o: ['पोलैंड', 'स्पेन', 'फ़्रांस', 'जर्मनी'], a: 0, e: 'उद्घाटन फ़िल्म Fatherland पोलिश निर्देशक पावेल पावलिकोव्स्की की है।' } });
+  CMS.saveLocal();
+}
+Object.assign(ACTIONS, {
+  'bug-open': () => openBug(''),
+  'bug-sev': el => { bugForm.sev = el.dataset.v; $$('[data-act="bug-sev"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === bugForm.sev))); const h = $('#bg-sev-help'); if (h) h.textContent = (SEVS.find(x => x[0] === bugForm.sev) || [])[2] || ''; },
+  'bug-type': el => { bugForm.type = el.dataset.v; $$('[data-act="bug-type"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === bugForm.type))); },
+  'bug-copy': el => { const b = T.bugs.find(x => x.id === el.dataset.id); if (b) copyText(bugText(b), 'रिपोर्ट कॉपी हुई — WhatsApp, ईमेल या कहीं भी पेस्ट करें'); },
+  'bug-wa': el => { const b = T.bugs.find(x => x.id === el.dataset.id); if (b) el.setAttribute('href', waLink(bugText(b))); },
+  'bug-del': el => { const id = el.dataset.id; confirmSheet('यह बग रिपोर्ट हटाएँ?', 'रिपोर्ट आपके फ़ोन से हट जाएगी।', 'हटाएँ', () => { T.bugs = T.bugs.filter(x => x.id !== id); T.save(); render(); }); },
+  'report-wa': el => { el.setAttribute('href', waLink(fullReportText())); },
+  'report-copy': () => copyText(fullReportText(), 'पूरी टेस्ट रिपोर्ट कॉपी हुई — अब WhatsApp या ईमेल में पेस्ट करें'),
+  'tc-pass': el => markCase(el.dataset.id, 'pass'),
+  'tc-skip': el => markCase(el.dataset.id, 'skip'),
+  'tc-fail': el => openBug(el.dataset.id),
+  'inbox-copy': () => {
+    const text = T.inbox.map(x => [`👤 ${x.name || 'टेस्टर'} · ${x.device}`, `टेस्ट: ${Object.keys(x.results).length}/${TESTS.length} · गड़बड़: ${TESTS.filter(t => x.results[t.id] === 'fail').map(t => t.id).join(', ') || '—'}`, ...x.items.map(b => bugText({ ...b, n: b.n, at: b.at || Date.now(), build: b.build || '' }))].join('\n')).join('\n\n———\n\n');
+    copyText(text, 'सभी टेस्टरों की रिपोर्ट कॉपी हुई');
+  },
+  'demo-reset-ask': () => confirmSheet('ऐप डेटा रीसेट करें?', 'आपकी प्रगति, बुकमार्क, मॉक इतिहास और एडमिन में किए बदलाव हट जाएँगे। टेस्ट सूची और बग रिपोर्ट बनी रहेंगी।', 'रीसेट करें', () => {
+    for (const k of ['progress', 'cms.pub', 'cms.drafts', 'cms.reports', 'exam', 'lastExam', 'onb-skip', 'demo.seeded']) LS.del(k);
+    U.s = DEF(); applySettings(); S = null; E = null; lastExam = null;
+    Object.assign(onb, { name: '', exam: '', goal: 10 });
+    loadLocalCms(); seedDemo(); bump();
+    toast('ऐप नए सिरे से शुरू — अब टेस्ट करें');
+    nav('home');
+  }),
+});
+FORMS.bug = async f => {
+  const g = id => ($('#' + id, f).value || '').trim();
+  const title = g('bg-title'), what = g('bg-what'), exp = g('bg-exp');
+  if (title.length < 4) { $('#bg-err', f).textContent = 'छोटा-सा शीर्षक लिखें।'; return; }
+  if (what.length < 6) { $('#bg-err', f).textContent = 'बताएँ कि क्या हुआ — इसी से डेवलपर गड़बड़ ढूँढ पाएँगे।'; return; }
+  const b = { id: rid(), n: T.bugs.reduce((mx, x) => Math.max(mx, Number(x.n) || 0), 0) + 1, title, what, exp, sev: bugForm.sev, type: bugForm.type, caseId: bugForm.caseId, screen: bugForm.ctx, route: bugForm.route, at: Date.now(), device: deviceInfo(), steps: T.log.slice(-15).join(' → '), errors: T.errors.slice(-5).map(e => `${e.m} (@${e.at})`), tester: T.name, build: BUILD, inbox: false };
+  T.bugs.push(b);
+  if (b.caseId) T.res[b.caseId] = 'fail';
+  T.save();
+  closeSheet();
+  openBugSent(b);
+  render();
+};
+
 // ───────────────────────────── router & render ─────────────────────────────
-const ROUTES = { home: vHome, quiz: vQuiz, play: vPlay, result: vResult, ca: vCA, today: vToday, mock: vMock, exam: vExam, 'exam-result': vExamResult, bookmarks: vBookmarks, profile: vProfile, admin: vAdmin, 'admin-ai': vAdminAI, 'admin-review': vAdminReview, 'admin-publish': vAdminPublish, 'admin-bank': vAdminBank, 'admin-news': vAdminNews, 'admin-days': vAdminDays };
-const NO_NAV = new Set(['play', 'result', 'exam', 'exam-result', ...ADMIN_ROUTES]);
+const ROUTES = { home: vHome, quiz: vQuiz, play: vPlay, result: vResult, ca: vCA, today: vToday, mock: vMock, exam: vExam, 'exam-result': vExamResult, bookmarks: vBookmarks, profile: vProfile, admin: vAdmin, 'admin-ai': vAdminAI, 'admin-review': vAdminReview, 'admin-publish': vAdminPublish, 'admin-bank': vAdminBank, 'admin-news': vAdminNews, 'admin-days': vAdminDays, test: vTest, 'test-inbox': vTestInbox };
+const NO_NAV = new Set(['play', 'result', 'exam', 'exam-result', 'test-inbox', ...ADMIN_ROUTES]);
 let route = 'home';
 const routeFromHash = () => { const h = decodeURIComponent(location.hash.replace(/^#/, '')); return ROUTES[h] ? h : 'home'; };
 function go(r) {
@@ -1785,7 +2091,7 @@ function redirect(r) {
   setTimeout(() => { try { history.replaceState(null, '', '#' + r); } catch { /* ignore */ } route = r; render(true); }, 0);
   return '<main class="page gutter"></main>';
 }
-window.addEventListener('hashchange', () => { route = routeFromHash(); closeSheet(); render(true); });
+window.addEventListener('hashchange', () => { route = routeFromHash(); if (DEMO) T.note('→' + route); closeSheet(); render(true); });
 
 let renderQueued = false, deferred = false, tickId = 0;
 function scheduleRender() {
@@ -1805,6 +2111,7 @@ function render(routeChanged = false) {
   app.classList.toggle('no-nav', NO_NAV.has(route));
   app.classList.toggle('exam-pad', route === 'exam');
   if (routeChanged) window.scrollTo(0, 0);
+  if (DEMO) renderDemoStrip();
   afterRender();
 }
 function afterRender() {
@@ -1842,13 +2149,15 @@ document.addEventListener('click', e => {
   if (!el) return;
   const fn = ACTIONS[el.dataset.act];
   if (!fn) return;
-  if (el.tagName === 'A' && el.dataset.act !== 'sheet-nav') e.preventDefault();
+  if (el.tagName === 'A' && (el.getAttribute('href') || '#').startsWith('#')) e.preventDefault();
+  if (DEMO) { const x = el.dataset.s || el.dataset.v || el.dataset.i || el.dataset.id || ''; T.note(el.dataset.act + (x ? ':' + String(x).slice(0, 14) : '')); }
   fn(el, e);
 });
 document.addEventListener('submit', e => {
   const f = e.target.closest('form[data-form]');
   if (!f) return;
   e.preventDefault();
+  if (DEMO) T.note('form:' + f.dataset.form);
   const fn = FORMS[f.dataset.form];
   if (fn) fn(f);
 });
@@ -1865,6 +2174,7 @@ document.addEventListener('change', e => {
   if (t.dataset.bind) setBind(t.dataset.bind, t);
   if (t.dataset.change && CHANGES[t.dataset.change]) CHANGES[t.dataset.change](t);
 });
+document.addEventListener('toggle', e => { const d = e.target; if (d && d.dataset && d.dataset.tc) { if (d.open) T.open = d.dataset.tc; else if (T.open === d.dataset.tc) T.open = ''; } }, true);
 document.addEventListener('focusout', () => { if (deferred) { deferred = false; setTimeout(scheduleRender, 0); } });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && sheetOpen()) { closeSheet(); return; }
@@ -1883,17 +2193,24 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 // ───────────────────────────── boot ─────────────────────────────
 function boot() {
+  if (DEMO) {
+    document.documentElement.classList.add('demo');
+    const onErr = msg => { T.errors.push({ m: String(msg || 'error').slice(0, 180), at: route, t: Date.now() }); if (T.errors.length > 10) T.errors.shift(); renderDemoStrip(); };
+    window.addEventListener('error', e => onErr(e.message || (e.error && e.error.message)));
+    window.addEventListener('unhandledrejection', e => { const r = e.reason; onErr(r && (r.message || r.code) ? r.message || r.code : r); });
+  }
   U.load();
   applySettings();
   const live = document.createElement('div');
   live.id = 'sr-live'; live.className = 'sr'; live.setAttribute('aria-live', 'assertive');
   document.body.appendChild(live);
   route = routeFromHash();
-  if (P.mode === 'standalone') loadLocalCms();
+  if (LOCAL()) { loadLocalCms(); seedDemo(); }
   render(true);
   loadBase();
   initPlatform().then(() => {
-    if (P.mode === 'artifact') { subscribeLive(); subscribeCms(); U.syncRemote(); }
+    if (P.mode === 'artifact' && !P.demo) { subscribeLive(); subscribeCms(); U.syncRemote(); }
+    if (P.demo) { subscribeInbox(); T.push(); }
     scheduleRender();
   });
   if (P.mode === 'standalone' && 'serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {

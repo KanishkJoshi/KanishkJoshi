@@ -6,6 +6,7 @@ The admin panel has a real pipeline. AI drafts questions from a source text, a h
 
 - **Live demo** (claude.ai artifact; private until you share it from its Share menu): https://claude.ai/artifact/7nKiG4QDwQbLCMCWm91XfR
 - **Design review, competitor references and roadmap**: https://claude.ai/artifact/WAhSbCYv6oe3Le5PULqniZ
+- **Tester build (demo)** to share with testers: https://claude.ai/artifact/TYUHLNaspNcibKAUdXz7DY (see [Tester build](#tester-build-demo))
 - Everything in this folder runs as-is on any static host, with no build step and no framework.
 
 ## Run it locally
@@ -81,6 +82,17 @@ Keep your LLM API key on a server, never in the app. Expose an endpoint that acc
 ```
 
 The admin generator then expects JSON in `text`, and the learner explanations take plain Hindi text.
+
+## Tester build (demo)
+
+The same code has a tester mode for QA. It's switched on by `window.MYQUIZ_CONFIG = { demo: true }`, or by adding `?demo=1` to the URL on any static host, e.g. `https://your-host/myquiz-app/?demo=1`.
+
+- **Isolated:** progress, bookmarks and every admin change stay in the tester's own browser. Testers can publish, hide and edit freely without touching real content.
+- **Test bar:** a striped yellow bar on every screen with **बग बताएँ** (report a bug) and **टेस्ट** (the checklist).
+- **Test checklist (`#test`):** 23 cases covering home, quiz, current affairs, Aaj ka Din, mock tests, settings, admin and navigation. Each case has steps and the expected result, plus **ठीक चला** (pass), **गड़बड़ है** (fail, which opens the bug form) and **छोड़ें** (skip).
+- **Bug reports** automatically include the screen and, during a quiz or exam, the question ID and text. They also include the device and browser, the tester's last 15 steps, and any JavaScript errors caught. Reports are kept on the device and sent to you through a WhatsApp link (`wa.me`) or copied as text. **पूरी रिपोर्ट भेजें** sends the whole checklist result plus all bugs in one message.
+- **Inbox:** in the claude.ai artifact, testers you invite as editors also send results straight to a private **टेस्टर इनबॉक्स** (`#test-inbox`, readable only by you and editors).
+- **Reset:** "ऐप डेटा रीसेट करें" restarts the app from scratch and keeps the checklist and bug reports.
 
 ## Content notes
 
