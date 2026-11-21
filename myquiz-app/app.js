@@ -55,7 +55,60 @@ const KINDS = {
   'स्थापना दिवस': { en: 'Foundation day', c: '#0F766E', icon: 'landmark', y: 'स्थापना', yEn: 'Formed' },
   'स्मृति दिवस': { en: 'Remembrance day', c: '#475569', icon: 'bulb', y: 'घटना वर्ष', yEn: 'Year' },
 };
-const EXAMS = [['SSC', 'SSC'], ['रेलवे', 'Railway'], ['बैंकिंग', 'Banking'], ['राज्य PSC', 'State PSC'], ['पुलिस', 'Police'], ['शिक्षक भर्ती', 'Teaching'], ['अन्य', 'Other']];
+// Examination categories (a learner picks one in onboarding; content is tagged by relevance).
+const EXAMS = [
+  { id: 'upsc', hi: 'UPSC', en: 'UPSC', dhi: 'सिविल सेवा', den: 'Civil services' },
+  { id: 'ssc', hi: 'SSC CGL', en: 'SSC CGL', dhi: 'SSC CGL, CHSL, MTS', den: 'SSC CGL, CHSL, MTS' },
+  { id: 'bank', hi: 'बैंकिंग', en: 'Banking', dhi: 'IBPS, SBI, RBI', den: 'IBPS, SBI, RBI' },
+  { id: 'rail', hi: 'रेलवे', en: 'Railway', dhi: 'RRB NTPC, ग्रुप D', den: 'RRB NTPC, Group D' },
+  { id: 'psc', hi: 'राज्य PSC', en: 'State PSC', dhi: 'राज्य सिविल सेवा', den: 'State civil services' },
+  { id: 'nda', hi: 'NDA/CDS', en: 'NDA/CDS', dhi: 'रक्षा सेवाएँ', den: 'Defence services' },
+  { id: 'school', hi: 'स्कूल/कॉलेज', en: 'School & college', dhi: 'कक्षा 6–12 और कॉलेज', den: 'Classes 6–12 and college' },
+  { id: 'gk', hi: 'सामान्य ज्ञान', en: 'General Knowledge', dhi: 'हर परीक्षा के लिए', den: 'For every exam' },
+];
+const EXAM_OLD = { 'SSC': 'ssc', 'रेलवे': 'rail', 'बैंकिंग': 'bank', 'राज्य PSC': 'psc', 'पुलिस': 'gk', 'शिक्षक भर्ती': 'school', 'अन्य': 'gk' };
+const ALL_EX = ['upsc', 'ssc', 'rail', 'psc', 'nda', 'school', 'gk'];
+// Subject → chapters. Questions carry `ch`; exam relevance (`ex`) comes from the chapter unless a question overrides it.
+const CHAPTERS = [
+  { id: 'h-anc', s: 'history', hi: 'प्राचीन भारत', en: 'Ancient India', ex: ALL_EX },
+  { id: 'h-med', s: 'history', hi: 'मध्यकालीन भारत', en: 'Medieval India', ex: ALL_EX },
+  { id: 'h-mod', s: 'history', hi: 'आधुनिक भारत', en: 'Modern India', ex: ALL_EX },
+  { id: 'h-free', s: 'history', hi: 'स्वतंत्रता आंदोलन', en: 'Freedom Struggle', ex: ALL_EX },
+  { id: 'g-water', s: 'geography', hi: 'नदियाँ और झीलें', en: 'Rivers and Lakes', ex: ALL_EX },
+  { id: 'g-relief', s: 'geography', hi: 'पर्वत, दर्रे और सीमाएँ', en: 'Mountains, Passes and Borders', ex: ALL_EX },
+  { id: 'g-india', s: 'geography', hi: 'भारत: राज्य, जलवायु और मिट्टी', en: 'India: States, Climate and Soils', ex: ALL_EX },
+  { id: 'g-world', s: 'geography', hi: 'विश्व भूगोल', en: 'World Geography', ex: ['upsc', 'ssc', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'p-making', s: 'polity', hi: 'संविधान निर्माण और स्रोत', en: 'Making of the Constitution', ex: ALL_EX },
+  { id: 'p-rights', s: 'polity', hi: 'मौलिक अधिकार', en: 'Fundamental Rights', ex: ALL_EX },
+  { id: 'p-union', s: 'polity', hi: 'संघ सरकार और आपातकाल', en: 'Union Government and Emergency', ex: ['upsc', 'ssc', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'p-amend', s: 'polity', hi: 'संशोधन और स्थानीय शासन', en: 'Amendments and Local Government', ex: ['upsc', 'ssc', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'sc-bio', s: 'science', hi: 'जीव विज्ञान', en: 'Biology', ex: ['ssc', 'rail', 'psc', 'nda', 'school', 'gk'] },
+  { id: 'sc-phy', s: 'science', hi: 'भौतिकी', en: 'Physics', ex: ['ssc', 'rail', 'psc', 'nda', 'school', 'gk'] },
+  { id: 'sc-chem', s: 'science', hi: 'रसायन विज्ञान', en: 'Chemistry', ex: ['ssc', 'rail', 'psc', 'nda', 'school', 'gk'] },
+  { id: 'sp-events', s: 'sports', hi: 'प्रतियोगिताएँ और ओलंपिक', en: 'Tournaments and Olympics', ex: ['ssc', 'rail', 'bank', 'gk'] },
+  { id: 'sp-rules', s: 'sports', hi: 'खेल नियम और स्थल', en: 'Rules and Venues', ex: ['ssc', 'rail', 'bank', 'gk'] },
+  { id: 'sp-awards', s: 'sports', hi: 'खेल पुरस्कार और दिवस', en: 'Sports Awards and Days', ex: ['ssc', 'rail', 'bank', 'gk'] },
+  { id: 'm-econ', s: 'misc', hi: 'अर्थव्यवस्था और कृषि', en: 'Economy and Agriculture', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'gk'] },
+  { id: 'm-tech', s: 'misc', hi: 'कंप्यूटर', en: 'Computers', ex: ['ssc', 'bank', 'rail', 'school', 'gk'] },
+  { id: 'm-media', s: 'misc', hi: 'मीडिया और संचार', en: 'Media and Communication', ex: ['ssc', 'rail', 'gk'] },
+  { id: 'm-symbols', s: 'misc', hi: 'प्रतीक, पुरस्कार और संगठन', en: 'Symbols, Awards and Organisations', ex: ['ssc', 'rail', 'bank', 'nda', 'school', 'gk'] },
+  { id: 'ca-sci', s: 'ca', hi: 'विज्ञान एवं तकनीक', en: 'Science and Technology', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'ca-sports', s: 'ca', hi: 'खेल', en: 'Sports', ex: ['ssc', 'bank', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'ca-culture', s: 'ca', hi: 'कला एवं संस्कृति', en: 'Art and Culture', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'gk'] },
+  { id: 'ca-env', s: 'ca', hi: 'पर्यावरण', en: 'Environment', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'ca-intl', s: 'ca', hi: 'अंतरराष्ट्रीय', en: 'International', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'ca-econ', s: 'ca', hi: 'अर्थव्यवस्था', en: 'Economy', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'gk'] },
+  { id: 'd-nat', s: 'days', hi: 'राष्ट्रीय दिवस', en: 'National Days', ex: ['ssc', 'rail', 'bank', 'school', 'gk'] },
+  { id: 'd-intl', s: 'days', hi: 'अंतरराष्ट्रीय दिवस', en: 'International Days', ex: ['ssc', 'rail', 'bank', 'school', 'gk'] },
+  { id: 'd-jay', s: 'days', hi: 'जयंती', en: 'Birth Anniversaries', ex: ['ssc', 'rail', 'bank', 'school', 'gk'] },
+  { id: 'd-found', s: 'days', hi: 'स्थापना दिवस', en: 'Foundation Days', ex: ['ssc', 'rail', 'bank', 'school', 'gk'] },
+  { id: 'd-smriti', s: 'days', hi: 'स्मृति दिवस', en: 'Remembrance Days', ex: ['ssc', 'rail', 'bank', 'school', 'gk'] },
+];
+const CHM = Object.fromEntries(CHAPTERS.map(c => [c.id, c]));
+const KIND_CH = { 'राष्ट्रीय': 'd-nat', 'अंतरराष्ट्रीय': 'd-intl', 'जयंती': 'd-jay', 'स्थापना दिवस': 'd-found', 'स्मृति दिवस': 'd-smriti' };
+const DIFF = { 1: ['शुरुआती', 'Beginner'], 2: ['मध्यम', 'Intermediate'], 3: ['उन्नत', 'Advanced'] };
+// Mastery of a chapter or topic, from coverage and accuracy of the latest attempts.
+const MASTERY = [['शुरू नहीं', 'Not started'], ['सीख रहे हैं', 'Learning'], ['अभ्यास में', 'Practising'], ['मज़बूत', 'Strong'], ['महारत', 'Mastered']];
 const MOCKS = [
   { id: 'gk-1', title: 'सामान्य ज्ञान मिनी मॉक – 1', titleEn: 'General Knowledge Mini Mock – 1', desc: 'इतिहास, भूगोल, संविधान, विज्ञान, खेल और विविध — SSC जैसी अंकन योजना।', descEn: 'History, geography, polity, science, sports and more, with SSC-style marking.', mix: { history: 4, geography: 3, polity: 4, science: 4, sports: 2, misc: 3 }, mins: 12, pos: 2, neg: 0.5 },
   { id: 'ca-latest', title: 'करेंट अफेयर्स मॉक', titleEn: 'Current Affairs Mock', desc: 'हाल की प्रमुख ख़बरों से 12 प्रश्न।', descEn: '12 questions from recent major news.', mix: { ca: 12 }, latest: true, mins: 8, pos: 2, neg: 0.5 },
@@ -65,11 +118,11 @@ const TYPE_LABEL = { q: ['प्रश्न', 'Question'], news: ['समाच
 const COLL = { q: 'q', news: 'news', day: 'days' };
 
 // Reward points. A question earns points only on its first attempt each day; daily cap stops farming.
-const PTS = { correct: 10, wrong: 1, timed: 2, daily: 20, perfect: 20, goal: 20, streakStep: 5, streakMax: 50, mockX: 3, cap: 600 };
+const PTS = { correct: 10, wrong: 1, timed: 2, daily: 20, perfect: 20, goal: 20, streakStep: 5, streakMax: 50, mockX: 3, revise: 5, wchal: 30, cap: 600 };
 const PTS_REASON = {
   correct: ['सही उत्तर', 'Correct answers'], wrong: ['प्रयास', 'Attempts'], goal: ['रोज़ का लक्ष्य पूरा', 'Daily goal reached'],
   streak: ['स्ट्रीक बोनस', 'Streak bonus'], daily: ['दैनिक क्विज पूरा', 'Daily quiz completed'], perfect: ['दैनिक क्विज में सभी सही', 'Perfect daily quiz'],
-  mock: ['मॉक टेस्ट', 'Mock test'],
+  mock: ['मॉक टेस्ट', 'Mock test'], revise: ['दोहराव में सही', 'Correct on revision'], wchal: ['साप्ताहिक चुनौती', 'Weekly challenge'],
 };
 const BADGES = [
   { id: 'first', icon: 'zap', hi: 'पहला क़दम', en: 'First step', dhi: 'पहला प्रश्न हल किया', den: 'Answered your first question', test: s => s.answers >= 1 },
@@ -79,6 +132,9 @@ const BADGES = [
   { id: 'acc80', icon: 'check', hi: 'सटीक निशाना', en: 'Sharp shooter', dhi: '50+ उत्तरों में 80% सटीकता', den: '80% accuracy over 50+ answers', test: s => s.answers >= 50 && s.acc >= 80 },
   { id: 'mock', icon: 'clipboard', hi: 'मॉक योद्धा', en: 'Mock warrior', dhi: 'पहला मॉक टेस्ट दिया', den: 'Took your first mock test', test: s => s.mocks >= 1 },
   { id: 'pts1k', icon: 'coins', hi: '1,000 पॉइंट्स', en: '1,000 points', dhi: 'कुल 1,000 पॉइंट्स जुटाए', den: 'Collected 1,000 points in total', test: s => s.total >= 1000 },
+  { id: 'reviser', icon: 'rotate', hi: 'दोहराव का धनी', en: 'Reviser', dhi: 'दोहराव में 25 सही उत्तर', den: '25 correct answers in revision', test: s => s.revised >= 25 },
+  { id: 'master', icon: 'layers', hi: 'अध्याय में महारत', en: 'Chapter master', dhi: 'किसी अध्याय में महारत हासिल की', den: 'Mastered a chapter', test: s => s.mastered >= 1 },
+  { id: 'weekly', icon: 'swords', hi: 'चुनौती स्वीकार', en: 'Challenger', dhi: 'पहली साप्ताहिक चुनौती पूरी की', den: 'Finished a weekly challenge', test: s => s.wcs >= 1 },
   { id: 'top3', icon: 'crown', hi: 'टॉप 3 विजेता', en: 'Top 3 winner', dhi: 'किसी सप्ताह या महीने के टॉप 3 में', den: 'Finished in a week or month top 3', test: s => s.won },
 ];
 
@@ -405,7 +461,9 @@ function M() {
   const newsById = new Map(news.map(n => [n.id, n]));
   const daysByMd = {};
   for (const d of days) (daysByMd[d.md] = daysByMd[d.md] || []).push(d);
-  memo = { ver: C.ver, day: today, qs, news, days, dayQs, all, byId, bySubj, newsById, daysByMd };
+  const byCh = {};
+  for (const q of all) (byCh[chOf(q)] = byCh[chOf(q)] || []).push(q);
+  memo = { ver: C.ver, day: today, qs, news, days, dayQs, all, byId, bySubj, byCh, newsById, daysByMd };
   return memo;
 }
 // Questions generated from the important-days calendar, in both languages (deterministic per entry).
@@ -413,20 +471,27 @@ function genDayQs(days) {
   const out = [];
   const mds = uniq(days.map(d => d.md));
   const enTitle = new Map(days.map(x => [x.t, (x.en && x.en.t) || x.t]));
+  const mdOfTitle = new Map(days.map(x => [x.t, x.md]));
+  const titlesOn = md => days.filter(x => x.md === md);
   for (const d of days) {
     const r = rng('dq:' + d.id);
     const dEn = d.en || {};
     const otherMds = shuffle(mds.filter(m => m !== d.md), r).slice(0, 3);
     if (otherMds.length === 3) {
       const opts = shuffle([d.md, ...otherMds], r);
-      out.push({ id: `dq-${d.id}-a`, s: 'days', t: 'महत्वपूर्ण दिवस', d: 1, day: d.md, gen: true, q: `'${d.t}' कब मनाया जाता है?`, o: opts.map(m => fmtMDin(m, 'hi')), a: opts.indexOf(d.md), e: d.h,
-        en: { t: 'Important Days', q: `When is '${dEn.t || d.t}' observed?`, o: opts.map(m => fmtMDin(m, 'en')), e: dEn.h || d.h } });
+      const on = m => titlesOn(m);
+      out.push({ id: `dq-${d.id}-a`, s: 'days', ch: KIND_CH[d.k] || 'd-nat', t: 'महत्वपूर्ण दिवस', d: 1, day: d.md, gen: true, q: `'${d.t}' कब मनाया जाता है?`, o: opts.map(m => fmtMDin(m, 'hi')), a: opts.indexOf(d.md), e: d.h, ctx: d.o || '',
+        why: opts.map(m => (m === d.md ? '' : `${fmtMDin(m, 'hi')} को ${on(m).map(x => x.t).join(' और ')} मनाया जाता है।`)),
+        en: { t: 'Important Days', q: `When is '${dEn.t || d.t}' observed?`, o: opts.map(m => fmtMDin(m, 'en')), e: dEn.h || d.h, ctx: dEn.o || d.o || '',
+          why: opts.map(m => (m === d.md ? '' : `${fmtMDin(m, 'en')} is ${on(m).map(x => (x.en && x.en.t) || x.t).join(' and ')}.`)) } });
     }
     const others = shuffle(uniq(days.filter(x => x.md !== d.md).map(x => x.t)), r).slice(0, 3);
     if (others.length === 3) {
       const opts = shuffle([d.t, ...others], r);
-      out.push({ id: `dq-${d.id}-b`, s: 'days', t: 'महत्वपूर्ण दिवस', d: 2, day: d.md, gen: true, q: `${fmtMDin(d.md, 'hi')} को इनमें से कौन-सा दिवस मनाया जाता है?`, o: opts, a: opts.indexOf(d.t), e: d.h,
-        en: { t: 'Important Days', q: `Which of these is observed on ${fmtMDin(d.md, 'en')}?`, o: opts.map(t => enTitle.get(t) || t), e: dEn.h || d.h } });
+      out.push({ id: `dq-${d.id}-b`, s: 'days', ch: KIND_CH[d.k] || 'd-nat', t: 'महत्वपूर्ण दिवस', d: 2, day: d.md, gen: true, q: `${fmtMDin(d.md, 'hi')} को इनमें से कौन-सा दिवस मनाया जाता है?`, o: opts, a: opts.indexOf(d.t), e: d.h, ctx: d.o || '',
+        why: opts.map(t => (t === d.t ? '' : `${t} ${fmtMDin(mdOfTitle.get(t), 'hi')} को मनाया जाता है।`)),
+        en: { t: 'Important Days', q: `Which of these is observed on ${fmtMDin(d.md, 'en')}?`, o: opts.map(t => enTitle.get(t) || t), e: dEn.h || d.h, ctx: dEn.o || d.o || '',
+          why: opts.map(t => (t === d.t ? '' : `${enTitle.get(t) || t} is observed on ${fmtMDin(mdOfTitle.get(t), 'en')}.`)) } });
     }
   }
   return out;
@@ -441,8 +506,9 @@ function presentQ(q, seed) {
     ? idx.slice().sort((i, j) => parseFloat(String(q.o[i]).replace(/,/g, '')) - parseFloat(String(q.o[j]).replace(/,/g, '')))
     : shuffle(idx, rng(seed + ':' + q.id));
   const pick = arr => order.map(i => arr[i]);
-  const en = q.en && Array.isArray(q.en.o) && q.en.o.length === 4 ? { ...q.en, o: pick(q.en.o) } : q.en;
-  return { ...q, o: pick(q.o), en, a: order.indexOf(q.a) };
+  const w4 = a => Array.isArray(a) && a.length === 4;
+  const en = q.en && w4(q.en.o) ? { ...q.en, o: pick(q.en.o), why: w4(q.en.why) ? pick(q.en.why) : q.en.why } : q.en;
+  return { ...q, o: pick(q.o), why: w4(q.why) ? pick(q.why) : q.why, en, a: order.indexOf(q.a) };
 }
 // Text in the current language (falls back to Hindi when a translation is missing).
 const qT = q => tx(q, 'q');
@@ -460,7 +526,23 @@ const dF = d => (LANG === 'en' && d.en && Array.isArray(d.en.f) && d.en.f.length
 const subjName = k => (SUBJ[k] ? L(SUBJ[k].name, SUBJ[k].en) : k);
 const catLabel = c => { const x = CATS.find(y => y.k === c); return x ? L(x.k, x.en) : c; };
 const kindLabel = k => (KINDS[k] ? L(k, KINDS[k].en) : k);
-const examLabel = v => { const x = EXAMS.find(e => e[0] === v); return x ? L(x[0], x[1]) : v; };
+const examOf = v => EXAMS.find(e => e.id === v || e.hi === v);
+const examLabel = v => { const x = examOf(v); return x ? L(x.hi, x.en) : v; };
+// Rich explanation parts, in the current language with a Hindi fallback.
+const qWhy = q => (LANG === 'en' && q.en && Array.isArray(q.en.why) && q.en.why.length === 4 ? q.en.why : Array.isArray(q.why) ? q.why : []);
+const qCtx = q => tx(q, 'ctx');
+const qRef = q => tx(q, 'ref');
+const chOf = q => q.ch || (q.s === 'days' ? 'd-nat' : q.s + '-other');
+const chName = id => (CHM[id] ? L(CHM[id].hi, CHM[id].en) : L('अन्य', 'Other'));
+const examsOf = q => (Array.isArray(q.ex) && q.ex.length ? q.ex : CHM[chOf(q)] ? CHM[chOf(q)].ex : ['gk']);
+const diffLabel = d => { const x = DIFF[d] || DIFF[1]; return L(x[0], x[1]); };
+const diffBars = d => `<span class="diff" title="${esc(diffLabel(d))}">${[1, 2, 3].map(i => `<i class="${i <= (d || 1) ? 'on' : ''}"></i>`).join('')} ${esc(diffLabel(d))}</span>`;
+// Chapters of a subject that have questions (plus any defined ones), in definition order.
+const chaptersOf = s => {
+  const m = M(), list = CHAPTERS.filter(c => c.s === s && (m.byCh[c.id] || []).length);
+  if ((m.byCh[s + '-other'] || []).length) list.push({ id: s + '-other', s, hi: 'अन्य प्रश्न', en: 'Other questions', ex: ['gk'] });
+  return list;
+};
 const mockTitle = mk => L(mk.title, mk.titleEn);
 
 // ───────────────────────────── CMS operations ─────────────────────────────
@@ -523,7 +605,13 @@ const DEF = () => ({
   fl: { d: '', k: [] },                 // once-per-day bonuses already given today
   lb: { name: '', hide: false },        // how this learner appears on the leaderboard
   badges: {},                           // badge id -> date earned
-  set: { scale: 1, theme: 'system', mode: 'practice', count: 10, lang: 'hi' },
+  onb: false, level: null,              // onboarding done; level-check score (0-100) or null
+  dok: {},                              // correct answers per day (accuracy trends)
+  hist: [],                             // latest answers [{id, ok, ms, t, m}] (m: p practice, e exam, r revision)
+  recent: [],                           // recently studied chapters [{ch, t}]
+  wc: {},                               // weekly challenge results by week key {score, max, sec, at}
+  revised: 0,                           // correct answers on due revision questions
+  set: { scale: 1, theme: 'system', mode: 'practice', count: 10, lang: 'hi', diff: 0 },
   updatedAt: 0,
 });
 const obj = (v, d) => (v && typeof v === 'object' && !Array.isArray(v) ? v : d);
@@ -534,8 +622,11 @@ const U = {
     const s = { ...d, ...obj(x, {}) };
     s.bm = { q: Array.isArray(s.bm && s.bm.q) ? s.bm.q : [], n: Array.isArray(s.bm && s.bm.n) ? s.bm.n : [] };
     s.set = { ...d.set, ...obj(s.set, {}) };
-    for (const k of ['days', 'ans', 'daily', 'badges']) s[k] = obj(s[k], {});
-    if (!Array.isArray(s.mocks)) s.mocks = [];
+    for (const k of ['days', 'ans', 'daily', 'badges', 'dok', 'wc']) s[k] = obj(s[k], {});
+    for (const k of ['mocks', 'hist', 'recent']) if (!Array.isArray(s[k])) s[k] = [];
+    s.revised = Number(s.revised) || 0;
+    if (s.exam && !EXAMS.some(e => e.id === s.exam)) s.exam = EXAM_OLD[s.exam] || (examOf(s.exam) || {}).id || '';
+    if (!s.onb && (s.name || Object.keys(s.ans).length)) s.onb = true; // existing learners skip onboarding
     const p = obj(s.pts, {});
     s.pts = { total: Number(p.total) || 0, days: obj(p.days, {}), log: Array.isArray(p.log) ? p.log : [] };
     if (!s.pts.total && Number(x && x.xp) > 0) s.pts.total = Math.round(Number(x.xp)); // v1 XP carries over
@@ -576,6 +667,8 @@ const U = {
     for (const k of Object.keys(this.s.days)) if (k < cutoff) delete this.s.days[k];
     for (const k of Object.keys(this.s.daily)) if (k < cutoff) delete this.s.daily[k];
     for (const k of Object.keys(this.s.pts.days)) if (k < cutoff) delete this.s.pts.days[k];
+    for (const k of Object.keys(this.s.dok)) if (k < cutoff) delete this.s.dok[k];
+    if (this.s.hist.length > 300) this.s.hist.length = 300;
   },
   // ── reward points ──
   award(reason, n) {
@@ -612,10 +705,16 @@ const U = {
   record(q, ok, opts = {}) {
     const t = todayISO();
     const a = this.s.ans[q.id] || { c: 0, w: 0, b: 0 };
+    const wasDue = a.w > 0 && (a.b || 0) < SRS_GAPS.length - 1 && (a.due || t) <= t; // a revision question
     if (ok) { a.c++; a.b = Math.min(SRS_GAPS.length - 1, (a.b || 0) + 1); } else { a.w++; a.b = 0; }
     a.l = ok ? 1 : 0; a.t = Date.now(); a.due = addDays(t, SRS_GAPS[a.b]);
+    const ms = clamp(Math.round(Number(opts.ms) || 0), 0, 600000);
+    if (ms) a.tm = (a.tm || 0) + ms;
     this.s.ans[q.id] = a;
     this.s.days[t] = (this.s.days[t] || 0) + 1;
+    if (ok) this.s.dok[t] = (this.s.dok[t] || 0) + 1;
+    this.s.hist.unshift({ id: q.id, ok: ok ? 1 : 0, ms, t: Date.now(), m: opts.mode || 'p' });
+    this.seen(chOf(q));
     let earned = 0;
     this.lastBonus = []; // once-a-day bonuses unlocked by this answer, as [reason, points]
     const bonus = (reason, n) => { const got = this.award(reason, n); if (got) { earned += got; this.lastBonus.push([reason, got]); } };
@@ -625,6 +724,7 @@ const U = {
     const st = this.streak();
     if (st > (this.s.best || 0)) this.s.best = st;
     if (cnt >= STREAK_MIN && this.once('streak')) bonus('streak', Math.min(PTS.streakStep * Math.max(1, st), PTS.streakMax));
+    if (ok && wasDue) { this.s.revised++; if (this.once('rev:' + q.id)) bonus('revise', PTS.revise); }
     this.prune();
     this.checkBadges();
     this.touch();
@@ -662,9 +762,45 @@ const U = {
     for (const a of Object.values(this.s.ans)) { c += a.c || 0; w += a.w || 0; n++; }
     return { attempts: c + w, correct: c, unique: n, acc: pct(c, c + w) };
   },
+  // ── learning analytics ──
+  seen(ch) { if (!ch) return; this.s.recent = [{ ch, t: Date.now() }, ...this.s.recent.filter(r => r.ch !== ch)].slice(0, 8); },
+  // Coverage and accuracy of a set of questions; mastery 0-4 (see MASTERY).
+  stats(list) {
+    let seen = 0, right = 0, c = 0, w = 0;
+    for (const q of list) { const a = this.s.ans[q.id]; if (a) { seen++; if (a.l) right++; c += a.c; w += a.w; } }
+    const total = list.length, cov = pct(seen, total), acc = pct(c, c + w), score = pct(right, total);
+    const level = !seen ? 0 : score >= 90 && cov === 100 ? 4 : score >= 70 ? 3 : score >= 40 ? 2 : 1;
+    return { total, seen, right, attempts: c + w, cov, acc, score, level };
+  },
+  chStats(ch) { return this.stats(M().byCh[ch] || []); },
+  // Topics (subject + topic) where the learner struggles: at least 2 attempts and under 70% accuracy.
+  weakTopics(n = 5, subj = '') {
+    const by = {};
+    for (const q of M().all) {
+      if (subj && q.s !== subj) continue;
+      const a = this.s.ans[q.id]; if (!a) continue;
+      const k = chOf(q) + '|' + (q.t || '');
+      const x = by[k] = by[k] || { ch: chOf(q), t: q.t || '', tEn: (q.en && q.en.t) || q.t || '', s: q.s, c: 0, w: 0, n: 0 };
+      x.c += a.c; x.w += a.w; x.n++;
+    }
+    return Object.values(by).filter(x => x.c + x.w >= 2 && pct(x.c, x.c + x.w) < 70).map(x => ({ ...x, acc: pct(x.c, x.c + x.w) })).sort((a, b) => a.acc - b.acc || b.w - a.w).slice(0, n);
+  },
+  masteredChapters() { return CHAPTERS.filter(c => (M().byCh[c.id] || []).length >= 3 && this.chStats(c.id).level === 4).length; },
+  rangeStats(from, to) {
+    let n = 0, ok = 0, pts = 0;
+    for (const [d, v] of Object.entries(this.s.days)) if (d >= from && d <= to) n += v;
+    for (const [d, v] of Object.entries(this.s.dok)) if (d >= from && d <= to) ok += v;
+    for (const [d, v] of Object.entries(this.s.pts.days)) if (d >= from && d <= to) pts += v;
+    return { n, ok, acc: pct(ok, n), pts };
+  },
+  avgSecs() {
+    let ms = 0, n = 0;
+    for (const a of Object.values(this.s.ans)) if (a.tm) { ms += a.tm; n += (a.c || 0) + (a.w || 0); }
+    return n ? Math.round(ms / n / 100) / 10 : 0;
+  },
   checkBadges() {
     const tot = this.totals();
-    const st = { answers: tot.attempts, acc: tot.acc, best: this.s.best || 0, mocks: this.s.mocks.length, total: this.s.pts.total, won: !!this.s.won };
+    const st = { answers: tot.attempts, acc: tot.acc, best: this.s.best || 0, mocks: this.s.mocks.length, total: this.s.pts.total, won: !!this.s.won, revised: this.s.revised, mastered: this.masteredChapters(), wcs: Object.keys(this.s.wc).length };
     const fresh = BADGES.filter(b => !this.s.badges[b.id] && b.test(st));
     for (const b of fresh) this.s.badges[b.id] = todayISO();
     if (fresh.length) setTimeout(() => toast(L('नया बैज मिला: ', 'New badge: ') + L(fresh[0].hi, fresh[0].en)), 600);

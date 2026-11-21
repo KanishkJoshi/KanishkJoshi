@@ -86,7 +86,9 @@ function M() {
   const newsById = new Map(news.map(n => [n.id, n]));
   const daysByMd = {};
   for (const d of days) (daysByMd[d.md] = daysByMd[d.md] || []).push(d);
-  memo = { ver: C.ver, day: today, qs, news, days, dayQs, all, byId, bySubj, newsById, daysByMd };
+  const byCh = {};
+  for (const q of all) (byCh[chOf(q)] = byCh[chOf(q)] || []).push(q);
+  memo = { ver: C.ver, day: today, qs, news, days, dayQs, all, byId, bySubj, byCh, newsById, daysByMd };
   return memo;
 }
 // Questions generated from the important-days calendar, in both languages (deterministic per entry).
@@ -94,20 +96,27 @@ function genDayQs(days) {
   const out = [];
   const mds = uniq(days.map(d => d.md));
   const enTitle = new Map(days.map(x => [x.t, (x.en && x.en.t) || x.t]));
+  const mdOfTitle = new Map(days.map(x => [x.t, x.md]));
+  const titlesOn = md => days.filter(x => x.md === md);
   for (const d of days) {
     const r = rng('dq:' + d.id);
     const dEn = d.en || {};
     const otherMds = shuffle(mds.filter(m => m !== d.md), r).slice(0, 3);
     if (otherMds.length === 3) {
       const opts = shuffle([d.md, ...otherMds], r);
-      out.push({ id: `dq-${d.id}-a`, s: 'days', t: 'महत्वपूर्ण दिवस', d: 1, day: d.md, gen: true, q: `'${d.t}' कब मनाया जाता है?`, o: opts.map(m => fmtMDin(m, 'hi')), a: opts.indexOf(d.md), e: d.h,
-        en: { t: 'Important Days', q: `When is '${dEn.t || d.t}' observed?`, o: opts.map(m => fmtMDin(m, 'en')), e: dEn.h || d.h } });
+      const on = m => titlesOn(m);
+      out.push({ id: `dq-${d.id}-a`, s: 'days', ch: KIND_CH[d.k] || 'd-nat', t: 'महत्वपूर्ण दिवस', d: 1, day: d.md, gen: true, q: `'${d.t}' कब मनाया जाता है?`, o: opts.map(m => fmtMDin(m, 'hi')), a: opts.indexOf(d.md), e: d.h, ctx: d.o || '',
+        why: opts.map(m => (m === d.md ? '' : `${fmtMDin(m, 'hi')} को ${on(m).map(x => x.t).join(' और ')} मनाया जाता है।`)),
+        en: { t: 'Important Days', q: `When is '${dEn.t || d.t}' observed?`, o: opts.map(m => fmtMDin(m, 'en')), e: dEn.h || d.h, ctx: dEn.o || d.o || '',
+          why: opts.map(m => (m === d.md ? '' : `${fmtMDin(m, 'en')} is ${on(m).map(x => (x.en && x.en.t) || x.t).join(' and ')}.`)) } });
     }
     const others = shuffle(uniq(days.filter(x => x.md !== d.md).map(x => x.t)), r).slice(0, 3);
     if (others.length === 3) {
       const opts = shuffle([d.t, ...others], r);
-      out.push({ id: `dq-${d.id}-b`, s: 'days', t: 'महत्वपूर्ण दिवस', d: 2, day: d.md, gen: true, q: `${fmtMDin(d.md, 'hi')} को इनमें से कौन-सा दिवस मनाया जाता है?`, o: opts, a: opts.indexOf(d.t), e: d.h,
-        en: { t: 'Important Days', q: `Which of these is observed on ${fmtMDin(d.md, 'en')}?`, o: opts.map(t => enTitle.get(t) || t), e: dEn.h || d.h } });
+      out.push({ id: `dq-${d.id}-b`, s: 'days', ch: KIND_CH[d.k] || 'd-nat', t: 'महत्वपूर्ण दिवस', d: 2, day: d.md, gen: true, q: `${fmtMDin(d.md, 'hi')} को इनमें से कौन-सा दिवस मनाया जाता है?`, o: opts, a: opts.indexOf(d.t), e: d.h, ctx: d.o || '',
+        why: opts.map(t => (t === d.t ? '' : `${t} ${fmtMDin(mdOfTitle.get(t), 'hi')} को मनाया जाता है।`)),
+        en: { t: 'Important Days', q: `Which of these is observed on ${fmtMDin(d.md, 'en')}?`, o: opts.map(t => enTitle.get(t) || t), e: dEn.h || d.h, ctx: dEn.o || d.o || '',
+          why: opts.map(t => (t === d.t ? '' : `${enTitle.get(t) || t} is observed on ${fmtMDin(mdOfTitle.get(t), 'en')}.`)) } });
     }
   }
   return out;
@@ -122,8 +131,9 @@ function presentQ(q, seed) {
     ? idx.slice().sort((i, j) => parseFloat(String(q.o[i]).replace(/,/g, '')) - parseFloat(String(q.o[j]).replace(/,/g, '')))
     : shuffle(idx, rng(seed + ':' + q.id));
   const pick = arr => order.map(i => arr[i]);
-  const en = q.en && Array.isArray(q.en.o) && q.en.o.length === 4 ? { ...q.en, o: pick(q.en.o) } : q.en;
-  return { ...q, o: pick(q.o), en, a: order.indexOf(q.a) };
+  const w4 = a => Array.isArray(a) && a.length === 4;
+  const en = q.en && w4(q.en.o) ? { ...q.en, o: pick(q.en.o), why: w4(q.en.why) ? pick(q.en.why) : q.en.why } : q.en;
+  return { ...q, o: pick(q.o), why: w4(q.why) ? pick(q.why) : q.why, en, a: order.indexOf(q.a) };
 }
 // Text in the current language (falls back to Hindi when a translation is missing).
 const qT = q => tx(q, 'q');
@@ -141,6 +151,22 @@ const dF = d => (LANG === 'en' && d.en && Array.isArray(d.en.f) && d.en.f.length
 const subjName = k => (SUBJ[k] ? L(SUBJ[k].name, SUBJ[k].en) : k);
 const catLabel = c => { const x = CATS.find(y => y.k === c); return x ? L(x.k, x.en) : c; };
 const kindLabel = k => (KINDS[k] ? L(k, KINDS[k].en) : k);
-const examLabel = v => { const x = EXAMS.find(e => e[0] === v); return x ? L(x[0], x[1]) : v; };
+const examOf = v => EXAMS.find(e => e.id === v || e.hi === v);
+const examLabel = v => { const x = examOf(v); return x ? L(x.hi, x.en) : v; };
+// Rich explanation parts, in the current language with a Hindi fallback.
+const qWhy = q => (LANG === 'en' && q.en && Array.isArray(q.en.why) && q.en.why.length === 4 ? q.en.why : Array.isArray(q.why) ? q.why : []);
+const qCtx = q => tx(q, 'ctx');
+const qRef = q => tx(q, 'ref');
+const chOf = q => q.ch || (q.s === 'days' ? 'd-nat' : q.s + '-other');
+const chName = id => (CHM[id] ? L(CHM[id].hi, CHM[id].en) : L('अन्य', 'Other'));
+const examsOf = q => (Array.isArray(q.ex) && q.ex.length ? q.ex : CHM[chOf(q)] ? CHM[chOf(q)].ex : ['gk']);
+const diffLabel = d => { const x = DIFF[d] || DIFF[1]; return L(x[0], x[1]); };
+const diffBars = d => `<span class="diff" title="${esc(diffLabel(d))}">${[1, 2, 3].map(i => `<i class="${i <= (d || 1) ? 'on' : ''}"></i>`).join('')} ${esc(diffLabel(d))}</span>`;
+// Chapters of a subject that have questions (plus any defined ones), in definition order.
+const chaptersOf = s => {
+  const m = M(), list = CHAPTERS.filter(c => c.s === s && (m.byCh[c.id] || []).length);
+  if ((m.byCh[s + '-other'] || []).length) list.push({ id: s + '-other', s, hi: 'अन्य प्रश्न', en: 'Other questions', ex: ['gk'] });
+  return list;
+};
 const mockTitle = mk => L(mk.title, mk.titleEn);
 

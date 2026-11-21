@@ -7,7 +7,13 @@ const DEF = () => ({
   fl: { d: '', k: [] },                 // once-per-day bonuses already given today
   lb: { name: '', hide: false },        // how this learner appears on the leaderboard
   badges: {},                           // badge id -> date earned
-  set: { scale: 1, theme: 'system', mode: 'practice', count: 10, lang: 'hi' },
+  onb: false, level: null,              // onboarding done; level-check score (0-100) or null
+  dok: {},                              // correct answers per day (accuracy trends)
+  hist: [],                             // latest answers [{id, ok, ms, t, m}] (m: p practice, e exam, r revision)
+  recent: [],                           // recently studied chapters [{ch, t}]
+  wc: {},                               // weekly challenge results by week key {score, max, sec, at}
+  revised: 0,                           // correct answers on due revision questions
+  set: { scale: 1, theme: 'system', mode: 'practice', count: 10, lang: 'hi', diff: 0 },
   updatedAt: 0,
 });
 const obj = (v, d) => (v && typeof v === 'object' && !Array.isArray(v) ? v : d);
@@ -18,8 +24,11 @@ const U = {
     const s = { ...d, ...obj(x, {}) };
     s.bm = { q: Array.isArray(s.bm && s.bm.q) ? s.bm.q : [], n: Array.isArray(s.bm && s.bm.n) ? s.bm.n : [] };
     s.set = { ...d.set, ...obj(s.set, {}) };
-    for (const k of ['days', 'ans', 'daily', 'badges']) s[k] = obj(s[k], {});
-    if (!Array.isArray(s.mocks)) s.mocks = [];
+    for (const k of ['days', 'ans', 'daily', 'badges', 'dok', 'wc']) s[k] = obj(s[k], {});
+    for (const k of ['mocks', 'hist', 'recent']) if (!Array.isArray(s[k])) s[k] = [];
+    s.revised = Number(s.revised) || 0;
+    if (s.exam && !EXAMS.some(e => e.id === s.exam)) s.exam = EXAM_OLD[s.exam] || (examOf(s.exam) || {}).id || '';
+    if (!s.onb && (s.name || Object.keys(s.ans).length)) s.onb = true; // existing learners skip onboarding
     const p = obj(s.pts, {});
     s.pts = { total: Number(p.total) || 0, days: obj(p.days, {}), log: Array.isArray(p.log) ? p.log : [] };
     if (!s.pts.total && Number(x && x.xp) > 0) s.pts.total = Math.round(Number(x.xp)); // v1 XP carries over
@@ -60,6 +69,8 @@ const U = {
     for (const k of Object.keys(this.s.days)) if (k < cutoff) delete this.s.days[k];
     for (const k of Object.keys(this.s.daily)) if (k < cutoff) delete this.s.daily[k];
     for (const k of Object.keys(this.s.pts.days)) if (k < cutoff) delete this.s.pts.days[k];
+    for (const k of Object.keys(this.s.dok)) if (k < cutoff) delete this.s.dok[k];
+    if (this.s.hist.length > 300) this.s.hist.length = 300;
   },
   // ── reward points ──
   award(reason, n) {
@@ -96,10 +107,16 @@ const U = {
   record(q, ok, opts = {}) {
     const t = todayISO();
     const a = this.s.ans[q.id] || { c: 0, w: 0, b: 0 };
+    const wasDue = a.w > 0 && (a.b || 0) < SRS_GAPS.length - 1 && (a.due || t) <= t; // a revision question
     if (ok) { a.c++; a.b = Math.min(SRS_GAPS.length - 1, (a.b || 0) + 1); } else { a.w++; a.b = 0; }
     a.l = ok ? 1 : 0; a.t = Date.now(); a.due = addDays(t, SRS_GAPS[a.b]);
+    const ms = clamp(Math.round(Number(opts.ms) || 0), 0, 600000);
+    if (ms) a.tm = (a.tm || 0) + ms;
     this.s.ans[q.id] = a;
     this.s.days[t] = (this.s.days[t] || 0) + 1;
+    if (ok) this.s.dok[t] = (this.s.dok[t] || 0) + 1;
+    this.s.hist.unshift({ id: q.id, ok: ok ? 1 : 0, ms, t: Date.now(), m: opts.mode || 'p' });
+    this.seen(chOf(q));
     let earned = 0;
     this.lastBonus = []; // once-a-day bonuses unlocked by this answer, as [reason, points]
     const bonus = (reason, n) => { const got = this.award(reason, n); if (got) { earned += got; this.lastBonus.push([reason, got]); } };
@@ -109,6 +126,7 @@ const U = {
     const st = this.streak();
     if (st > (this.s.best || 0)) this.s.best = st;
     if (cnt >= STREAK_MIN && this.once('streak')) bonus('streak', Math.min(PTS.streakStep * Math.max(1, st), PTS.streakMax));
+    if (ok && wasDue) { this.s.revised++; if (this.once('rev:' + q.id)) bonus('revise', PTS.revise); }
     this.prune();
     this.checkBadges();
     this.touch();
@@ -146,9 +164,45 @@ const U = {
     for (const a of Object.values(this.s.ans)) { c += a.c || 0; w += a.w || 0; n++; }
     return { attempts: c + w, correct: c, unique: n, acc: pct(c, c + w) };
   },
+  // ── learning analytics ──
+  seen(ch) { if (!ch) return; this.s.recent = [{ ch, t: Date.now() }, ...this.s.recent.filter(r => r.ch !== ch)].slice(0, 8); },
+  // Coverage and accuracy of a set of questions; mastery 0-4 (see MASTERY).
+  stats(list) {
+    let seen = 0, right = 0, c = 0, w = 0;
+    for (const q of list) { const a = this.s.ans[q.id]; if (a) { seen++; if (a.l) right++; c += a.c; w += a.w; } }
+    const total = list.length, cov = pct(seen, total), acc = pct(c, c + w), score = pct(right, total);
+    const level = !seen ? 0 : score >= 90 && cov === 100 ? 4 : score >= 70 ? 3 : score >= 40 ? 2 : 1;
+    return { total, seen, right, attempts: c + w, cov, acc, score, level };
+  },
+  chStats(ch) { return this.stats(M().byCh[ch] || []); },
+  // Topics (subject + topic) where the learner struggles: at least 2 attempts and under 70% accuracy.
+  weakTopics(n = 5, subj = '') {
+    const by = {};
+    for (const q of M().all) {
+      if (subj && q.s !== subj) continue;
+      const a = this.s.ans[q.id]; if (!a) continue;
+      const k = chOf(q) + '|' + (q.t || '');
+      const x = by[k] = by[k] || { ch: chOf(q), t: q.t || '', tEn: (q.en && q.en.t) || q.t || '', s: q.s, c: 0, w: 0, n: 0 };
+      x.c += a.c; x.w += a.w; x.n++;
+    }
+    return Object.values(by).filter(x => x.c + x.w >= 2 && pct(x.c, x.c + x.w) < 70).map(x => ({ ...x, acc: pct(x.c, x.c + x.w) })).sort((a, b) => a.acc - b.acc || b.w - a.w).slice(0, n);
+  },
+  masteredChapters() { return CHAPTERS.filter(c => (M().byCh[c.id] || []).length >= 3 && this.chStats(c.id).level === 4).length; },
+  rangeStats(from, to) {
+    let n = 0, ok = 0, pts = 0;
+    for (const [d, v] of Object.entries(this.s.days)) if (d >= from && d <= to) n += v;
+    for (const [d, v] of Object.entries(this.s.dok)) if (d >= from && d <= to) ok += v;
+    for (const [d, v] of Object.entries(this.s.pts.days)) if (d >= from && d <= to) pts += v;
+    return { n, ok, acc: pct(ok, n), pts };
+  },
+  avgSecs() {
+    let ms = 0, n = 0;
+    for (const a of Object.values(this.s.ans)) if (a.tm) { ms += a.tm; n += (a.c || 0) + (a.w || 0); }
+    return n ? Math.round(ms / n / 100) / 10 : 0;
+  },
   checkBadges() {
     const tot = this.totals();
-    const st = { answers: tot.attempts, acc: tot.acc, best: this.s.best || 0, mocks: this.s.mocks.length, total: this.s.pts.total, won: !!this.s.won };
+    const st = { answers: tot.attempts, acc: tot.acc, best: this.s.best || 0, mocks: this.s.mocks.length, total: this.s.pts.total, won: !!this.s.won, revised: this.s.revised, mastered: this.masteredChapters(), wcs: Object.keys(this.s.wc).length };
     const fresh = BADGES.filter(b => !this.s.badges[b.id] && b.test(st));
     for (const b of fresh) this.s.badges[b.id] = todayISO();
     if (fresh.length) setTimeout(() => toast(L('नया बैज मिला: ', 'New badge: ') + L(fresh[0].hi, fresh[0].en)), 600);

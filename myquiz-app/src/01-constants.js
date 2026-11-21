@@ -55,7 +55,60 @@ const KINDS = {
   'स्थापना दिवस': { en: 'Foundation day', c: '#0F766E', icon: 'landmark', y: 'स्थापना', yEn: 'Formed' },
   'स्मृति दिवस': { en: 'Remembrance day', c: '#475569', icon: 'bulb', y: 'घटना वर्ष', yEn: 'Year' },
 };
-const EXAMS = [['SSC', 'SSC'], ['रेलवे', 'Railway'], ['बैंकिंग', 'Banking'], ['राज्य PSC', 'State PSC'], ['पुलिस', 'Police'], ['शिक्षक भर्ती', 'Teaching'], ['अन्य', 'Other']];
+// Examination categories (a learner picks one in onboarding; content is tagged by relevance).
+const EXAMS = [
+  { id: 'upsc', hi: 'UPSC', en: 'UPSC', dhi: 'सिविल सेवा', den: 'Civil services' },
+  { id: 'ssc', hi: 'SSC CGL', en: 'SSC CGL', dhi: 'SSC CGL, CHSL, MTS', den: 'SSC CGL, CHSL, MTS' },
+  { id: 'bank', hi: 'बैंकिंग', en: 'Banking', dhi: 'IBPS, SBI, RBI', den: 'IBPS, SBI, RBI' },
+  { id: 'rail', hi: 'रेलवे', en: 'Railway', dhi: 'RRB NTPC, ग्रुप D', den: 'RRB NTPC, Group D' },
+  { id: 'psc', hi: 'राज्य PSC', en: 'State PSC', dhi: 'राज्य सिविल सेवा', den: 'State civil services' },
+  { id: 'nda', hi: 'NDA/CDS', en: 'NDA/CDS', dhi: 'रक्षा सेवाएँ', den: 'Defence services' },
+  { id: 'school', hi: 'स्कूल/कॉलेज', en: 'School & college', dhi: 'कक्षा 6–12 और कॉलेज', den: 'Classes 6–12 and college' },
+  { id: 'gk', hi: 'सामान्य ज्ञान', en: 'General Knowledge', dhi: 'हर परीक्षा के लिए', den: 'For every exam' },
+];
+const EXAM_OLD = { 'SSC': 'ssc', 'रेलवे': 'rail', 'बैंकिंग': 'bank', 'राज्य PSC': 'psc', 'पुलिस': 'gk', 'शिक्षक भर्ती': 'school', 'अन्य': 'gk' };
+const ALL_EX = ['upsc', 'ssc', 'rail', 'psc', 'nda', 'school', 'gk'];
+// Subject → chapters. Questions carry `ch`; exam relevance (`ex`) comes from the chapter unless a question overrides it.
+const CHAPTERS = [
+  { id: 'h-anc', s: 'history', hi: 'प्राचीन भारत', en: 'Ancient India', ex: ALL_EX },
+  { id: 'h-med', s: 'history', hi: 'मध्यकालीन भारत', en: 'Medieval India', ex: ALL_EX },
+  { id: 'h-mod', s: 'history', hi: 'आधुनिक भारत', en: 'Modern India', ex: ALL_EX },
+  { id: 'h-free', s: 'history', hi: 'स्वतंत्रता आंदोलन', en: 'Freedom Struggle', ex: ALL_EX },
+  { id: 'g-water', s: 'geography', hi: 'नदियाँ और झीलें', en: 'Rivers and Lakes', ex: ALL_EX },
+  { id: 'g-relief', s: 'geography', hi: 'पर्वत, दर्रे और सीमाएँ', en: 'Mountains, Passes and Borders', ex: ALL_EX },
+  { id: 'g-india', s: 'geography', hi: 'भारत: राज्य, जलवायु और मिट्टी', en: 'India: States, Climate and Soils', ex: ALL_EX },
+  { id: 'g-world', s: 'geography', hi: 'विश्व भूगोल', en: 'World Geography', ex: ['upsc', 'ssc', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'p-making', s: 'polity', hi: 'संविधान निर्माण और स्रोत', en: 'Making of the Constitution', ex: ALL_EX },
+  { id: 'p-rights', s: 'polity', hi: 'मौलिक अधिकार', en: 'Fundamental Rights', ex: ALL_EX },
+  { id: 'p-union', s: 'polity', hi: 'संघ सरकार और आपातकाल', en: 'Union Government and Emergency', ex: ['upsc', 'ssc', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'p-amend', s: 'polity', hi: 'संशोधन और स्थानीय शासन', en: 'Amendments and Local Government', ex: ['upsc', 'ssc', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'sc-bio', s: 'science', hi: 'जीव विज्ञान', en: 'Biology', ex: ['ssc', 'rail', 'psc', 'nda', 'school', 'gk'] },
+  { id: 'sc-phy', s: 'science', hi: 'भौतिकी', en: 'Physics', ex: ['ssc', 'rail', 'psc', 'nda', 'school', 'gk'] },
+  { id: 'sc-chem', s: 'science', hi: 'रसायन विज्ञान', en: 'Chemistry', ex: ['ssc', 'rail', 'psc', 'nda', 'school', 'gk'] },
+  { id: 'sp-events', s: 'sports', hi: 'प्रतियोगिताएँ और ओलंपिक', en: 'Tournaments and Olympics', ex: ['ssc', 'rail', 'bank', 'gk'] },
+  { id: 'sp-rules', s: 'sports', hi: 'खेल नियम और स्थल', en: 'Rules and Venues', ex: ['ssc', 'rail', 'bank', 'gk'] },
+  { id: 'sp-awards', s: 'sports', hi: 'खेल पुरस्कार और दिवस', en: 'Sports Awards and Days', ex: ['ssc', 'rail', 'bank', 'gk'] },
+  { id: 'm-econ', s: 'misc', hi: 'अर्थव्यवस्था और कृषि', en: 'Economy and Agriculture', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'gk'] },
+  { id: 'm-tech', s: 'misc', hi: 'कंप्यूटर', en: 'Computers', ex: ['ssc', 'bank', 'rail', 'school', 'gk'] },
+  { id: 'm-media', s: 'misc', hi: 'मीडिया और संचार', en: 'Media and Communication', ex: ['ssc', 'rail', 'gk'] },
+  { id: 'm-symbols', s: 'misc', hi: 'प्रतीक, पुरस्कार और संगठन', en: 'Symbols, Awards and Organisations', ex: ['ssc', 'rail', 'bank', 'nda', 'school', 'gk'] },
+  { id: 'ca-sci', s: 'ca', hi: 'विज्ञान एवं तकनीक', en: 'Science and Technology', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'ca-sports', s: 'ca', hi: 'खेल', en: 'Sports', ex: ['ssc', 'bank', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'ca-culture', s: 'ca', hi: 'कला एवं संस्कृति', en: 'Art and Culture', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'gk'] },
+  { id: 'ca-env', s: 'ca', hi: 'पर्यावरण', en: 'Environment', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'ca-intl', s: 'ca', hi: 'अंतरराष्ट्रीय', en: 'International', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'nda', 'gk'] },
+  { id: 'ca-econ', s: 'ca', hi: 'अर्थव्यवस्था', en: 'Economy', ex: ['upsc', 'ssc', 'bank', 'rail', 'psc', 'gk'] },
+  { id: 'd-nat', s: 'days', hi: 'राष्ट्रीय दिवस', en: 'National Days', ex: ['ssc', 'rail', 'bank', 'school', 'gk'] },
+  { id: 'd-intl', s: 'days', hi: 'अंतरराष्ट्रीय दिवस', en: 'International Days', ex: ['ssc', 'rail', 'bank', 'school', 'gk'] },
+  { id: 'd-jay', s: 'days', hi: 'जयंती', en: 'Birth Anniversaries', ex: ['ssc', 'rail', 'bank', 'school', 'gk'] },
+  { id: 'd-found', s: 'days', hi: 'स्थापना दिवस', en: 'Foundation Days', ex: ['ssc', 'rail', 'bank', 'school', 'gk'] },
+  { id: 'd-smriti', s: 'days', hi: 'स्मृति दिवस', en: 'Remembrance Days', ex: ['ssc', 'rail', 'bank', 'school', 'gk'] },
+];
+const CHM = Object.fromEntries(CHAPTERS.map(c => [c.id, c]));
+const KIND_CH = { 'राष्ट्रीय': 'd-nat', 'अंतरराष्ट्रीय': 'd-intl', 'जयंती': 'd-jay', 'स्थापना दिवस': 'd-found', 'स्मृति दिवस': 'd-smriti' };
+const DIFF = { 1: ['शुरुआती', 'Beginner'], 2: ['मध्यम', 'Intermediate'], 3: ['उन्नत', 'Advanced'] };
+// Mastery of a chapter or topic, from coverage and accuracy of the latest attempts.
+const MASTERY = [['शुरू नहीं', 'Not started'], ['सीख रहे हैं', 'Learning'], ['अभ्यास में', 'Practising'], ['मज़बूत', 'Strong'], ['महारत', 'Mastered']];
 const MOCKS = [
   { id: 'gk-1', title: 'सामान्य ज्ञान मिनी मॉक – 1', titleEn: 'General Knowledge Mini Mock – 1', desc: 'इतिहास, भूगोल, संविधान, विज्ञान, खेल और विविध — SSC जैसी अंकन योजना।', descEn: 'History, geography, polity, science, sports and more, with SSC-style marking.', mix: { history: 4, geography: 3, polity: 4, science: 4, sports: 2, misc: 3 }, mins: 12, pos: 2, neg: 0.5 },
   { id: 'ca-latest', title: 'करेंट अफेयर्स मॉक', titleEn: 'Current Affairs Mock', desc: 'हाल की प्रमुख ख़बरों से 12 प्रश्न।', descEn: '12 questions from recent major news.', mix: { ca: 12 }, latest: true, mins: 8, pos: 2, neg: 0.5 },
@@ -65,11 +118,11 @@ const TYPE_LABEL = { q: ['प्रश्न', 'Question'], news: ['समाच
 const COLL = { q: 'q', news: 'news', day: 'days' };
 
 // Reward points. A question earns points only on its first attempt each day; daily cap stops farming.
-const PTS = { correct: 10, wrong: 1, timed: 2, daily: 20, perfect: 20, goal: 20, streakStep: 5, streakMax: 50, mockX: 3, cap: 600 };
+const PTS = { correct: 10, wrong: 1, timed: 2, daily: 20, perfect: 20, goal: 20, streakStep: 5, streakMax: 50, mockX: 3, revise: 5, wchal: 30, cap: 600 };
 const PTS_REASON = {
   correct: ['सही उत्तर', 'Correct answers'], wrong: ['प्रयास', 'Attempts'], goal: ['रोज़ का लक्ष्य पूरा', 'Daily goal reached'],
   streak: ['स्ट्रीक बोनस', 'Streak bonus'], daily: ['दैनिक क्विज पूरा', 'Daily quiz completed'], perfect: ['दैनिक क्विज में सभी सही', 'Perfect daily quiz'],
-  mock: ['मॉक टेस्ट', 'Mock test'],
+  mock: ['मॉक टेस्ट', 'Mock test'], revise: ['दोहराव में सही', 'Correct on revision'], wchal: ['साप्ताहिक चुनौती', 'Weekly challenge'],
 };
 const BADGES = [
   { id: 'first', icon: 'zap', hi: 'पहला क़दम', en: 'First step', dhi: 'पहला प्रश्न हल किया', den: 'Answered your first question', test: s => s.answers >= 1 },
@@ -79,6 +132,9 @@ const BADGES = [
   { id: 'acc80', icon: 'check', hi: 'सटीक निशाना', en: 'Sharp shooter', dhi: '50+ उत्तरों में 80% सटीकता', den: '80% accuracy over 50+ answers', test: s => s.answers >= 50 && s.acc >= 80 },
   { id: 'mock', icon: 'clipboard', hi: 'मॉक योद्धा', en: 'Mock warrior', dhi: 'पहला मॉक टेस्ट दिया', den: 'Took your first mock test', test: s => s.mocks >= 1 },
   { id: 'pts1k', icon: 'coins', hi: '1,000 पॉइंट्स', en: '1,000 points', dhi: 'कुल 1,000 पॉइंट्स जुटाए', den: 'Collected 1,000 points in total', test: s => s.total >= 1000 },
+  { id: 'reviser', icon: 'rotate', hi: 'दोहराव का धनी', en: 'Reviser', dhi: 'दोहराव में 25 सही उत्तर', den: '25 correct answers in revision', test: s => s.revised >= 25 },
+  { id: 'master', icon: 'layers', hi: 'अध्याय में महारत', en: 'Chapter master', dhi: 'किसी अध्याय में महारत हासिल की', den: 'Mastered a chapter', test: s => s.mastered >= 1 },
+  { id: 'weekly', icon: 'swords', hi: 'चुनौती स्वीकार', en: 'Challenger', dhi: 'पहली साप्ताहिक चुनौती पूरी की', den: 'Finished a weekly challenge', test: s => s.wcs >= 1 },
   { id: 'top3', icon: 'crown', hi: 'टॉप 3 विजेता', en: 'Top 3 winner', dhi: 'किसी सप्ताह या महीने के टॉप 3 में', den: 'Finished in a week or month top 3', test: s => s.won },
 ];
 
