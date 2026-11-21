@@ -5,6 +5,7 @@ A mobile-first, installable web app (PWA) built from the MY QUIZ design. It cove
 The admin panel has a real pipeline. AI drafts questions from a source text, a human reviews them against a checklist, and only then are they published to learners.
 
 - **Live demo** (claude.ai artifact; private until you share it from its Share menu): https://claude.ai/artifact/7nKiG4QDwQbLCMCWm91XfR
+- **Design review, competitor references and roadmap**: https://claude.ai/artifact/WAhSbCYv6oe3Le5PULqniZ
 - Everything in this folder runs as-is on any static host, with no build step and no framework.
 
 ## Run it locally
