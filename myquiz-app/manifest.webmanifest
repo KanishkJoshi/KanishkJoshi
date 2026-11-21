@@ -1,7 +1,7 @@
 {
-  "name": "MY QUIZ — सामान्य ज्ञान",
+  "name": "MY QUIZ — सामान्य ज्ञान | GK Quiz",
   "short_name": "MY QUIZ",
-  "description": "हिंदी में सामान्य ज्ञान क्विज, करेंट अफेयर्स, आज का दिन और मॉक टेस्ट",
+  "description": "हिंदी और English में सामान्य ज्ञान क्विज, करेंट अफेयर्स, आज का दिन, मॉक टेस्ट, रिवॉर्ड पॉइंट्स और लीडरबोर्ड · Hindi & English GK quiz with current affairs, mock tests, reward points and leaderboards",
   "lang": "hi",
   "dir": "ltr",
   "start_url": "./#home",
@@ -10,11 +10,47 @@
   "orientation": "portrait",
   "background_color": "#0B2E6F",
   "theme_color": "#0B2E6F",
-  "categories": ["education"],
+  "categories": [
+    "education"
+  ],
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "दैनिक क्विज · Daily quiz",
+      "short_name": "क्विज",
+      "url": "./#quiz"
+    },
+    {
+      "name": "लीडरबोर्ड · Leaderboard",
+      "short_name": "लीडरबोर्ड",
+      "url": "./#leaders"
+    },
+    {
+      "name": "करेंट अफेयर्स · Current affairs",
+      "short_name": "Current Affairs",
+      "url": "./#ca"
+    }
   ]
 }
