@@ -1,0 +1,48 @@
+// Tester build: sample students on the leaderboard, local prizes and winner announcement, 27 test cases.
+const { chromium } = require('playwright');
+(async () => {
+  const b = await chromium.launch();
+  const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on('pageerror', e => errs.push(e.message));
+  p.on('console', m => { if (m.type() === 'error' && !/fonts\.g/.test(m.text())) errs.push(m.text()); });
+  await p.goto('http://127.0.0.1:8765/index.html?demo=1#home');
+  await p.waitForSelector('.tile');
+  await p.click('[data-act="start-daily"]');
+  await p.waitForSelector('.qtext');
+  for (let i = 0; i < 10; i++) {
+    await p.click('.opt >> nth=0');
+    await p.waitForSelector('.explain');
+    await p.click('[data-act="next-q"]');
+    await p.waitForTimeout(60);
+  }
+  await p.waitForSelector('.result-hero');
+  console.log('result pts:', (await p.textContent('.result-hero .pill')).trim(), '| rows:', (await p.$$eval('.ptsrow', els => els.map(e => e.innerText.replace(/\s+/g, ' ')))).join(' / '));
+  await p.evaluate(() => { location.hash = 'leaders'; });
+  await p.waitForSelector('.podium');
+  const names = await p.$$eval('.pod-name, .lrow .lname', els => els.map(e => e.textContent.trim()));
+  console.log('demo board:', names.length, names.slice(0, 5).join(', '), '| me row:', await p.$$eval('.lrow.me .lname, .pod.me .pod-name', els => els.map(e => e.textContent.trim()).join()));
+  await p.screenshot({ path: 'tests/shots/demo-leaders.png' });
+  await p.evaluate(() => { location.hash = 'admin-rewards'; });
+  await p.waitForSelector('[data-act="announce-ask"][data-v="week"]');
+  await p.fill('#pz-week', 'टॉप 3 को मुफ़्त मॉक टेस्ट सीरीज़');
+  await p.click('form[data-form="prizes"] button[type="submit"]');
+  await p.waitForTimeout(200);
+  await p.click('[data-act="announce-ask"][data-v="week"]');
+  await p.click('.sheet [data-act="confirm-ok"]');
+  await p.waitForTimeout(300);
+  console.log('local winners:', await p.evaluate(() => JSON.parse(localStorage.getItem('mq.lb.winners') || '[]').map(w => w.id + ':' + w.top.length).join()));
+  await p.evaluate(() => { location.hash = 'leaders'; });
+  await p.waitForSelector('.seg-4');
+  await p.click('[data-act="lb-tab"][data-v="winners"]');
+  await p.waitForSelector('.win-card');
+  await p.screenshot({ path: 'tests/shots/demo-winners.png' });
+  await p.evaluate(() => { location.hash = 'test'; });
+  await p.waitForSelector('.tcase');
+  await p.click('.lang-btn');
+  await p.waitForTimeout(200);
+  console.log('test cases:', (await p.$$('.tcase')).length, '| groups:', (await p.$$eval('.tgroup', els => els.map(e => e.textContent))).join(' | '));
+  console.log('errors:', errs.length ? errs : 'none');
+  await b.close();
+})();
