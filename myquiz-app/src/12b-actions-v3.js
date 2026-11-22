@@ -20,6 +20,8 @@ function finishOnboarding() {
 }
 Object.assign(ACTIONS, {
   nav: el => go(el.dataset.to || 'home'),
+  'retry-load': () => { C.baseState = 'loading'; render(); loadBase(); },
+  'set-exam': el => { U.s.exam = el.dataset.v; learnState.ex = null; U.touch(); render(); },
   resume: () => { if (!resumeSession()) toast(L('पिछला सत्र अब उपलब्ध नहीं है।', 'The previous session is no longer available.'), 'info'); },
   'set-diff': el => { U.s.set.diff = Number(el.dataset.v) || 0; U.touch(); render(); },
   'learn-ex': el => { learnState.ex = el.dataset.v; render(); },
@@ -79,6 +81,7 @@ Object.assign(ACTIONS, {
     const lv = levelOf(U.s.pts.total), got = BADGES.filter(b => U.s.badges[b.id]).map(b => L(b.hi, b.en));
     shareText(L(`🏅 MY QUIZ पर मैं स्तर ${lv.lvl} पर हूँ — ${fmtNum(U.s.pts.total)} पॉइंट्स, ${U.streak()} दिन की स्ट्रीक। मेरे बैज: ${got.join(', ')}।`, `🏅 I'm at Level ${lv.lvl} on MY QUIZ — ${fmtNum(U.s.pts.total)} points and a ${U.streak()}-day streak. My badges: ${got.join(', ')}.`));
   },
+  'exam-retake': () => { const x = lastExam && lastExam.ex; if (x) startExamWith({ id: x.id, kind: x.kind === 'wchal' ? 'wchal' : x.kind === 'friend' ? 'friend' : 'custom', title: x.title, ids: x.qs, mins: Math.max(1, Math.round((x.endsAt - x.startedAt) / 60000)), pos: x.pos, neg: x.neg, back: x.back, meta: x.meta, seed: x.kind === 'wchal' ? x.seed : undefined }); },
   'ai-notes': el => aiNotes(el.dataset.ch),
   'notes-ch': el => go('notes/' + el.dataset.ch),
   print: () => { try { window.print(); } catch { toast(L('प्रिंट उपलब्ध नहीं है — टेक्स्ट कॉपी करें।', 'Printing is not available here — copy the text instead.'), 'info'); } },
@@ -113,4 +116,13 @@ Object.assign(FORMS, {
     go('challenge/' + code);
   },
   tutor: f => { const i = $('#tutor-in', f); const v = i ? i.value : ''; if (i) i.value = ''; tutorAsk(v); },
+});
+// Current affairs and Aaj ka Din (views in 10e-v3-daily.js)
+Object.assign(ACTIONS, {
+  'ca-tab': el => { caTab = el.dataset.v; render(); },
+  'ca-range-quiz': el => { const qs = caQs(caRange(el.dataset.v)); startSession('ca', el.dataset.v === 'week' ? ['साप्ताहिक करेंट अफेयर्स क्विज', 'Weekly current affairs quiz'] : ['मासिक करेंट अफेयर्स क्विज', 'Monthly current affairs quiz'], shuffle(qs).slice(0, 20), { back: 'ca' }); },
+  tts: el => { if (TTS.on) { stopSpeak(); return; } const n = M().newsById.get(el.dataset.id); if (n) speak(articleText(n)); },
+  'today-five': () => { const qs = todayFive(todayISO()).filter(Boolean); startSession('today5', ['आज का दिन · 5 प्रश्न', 'Today in History · 5 questions'], qs, { back: 'today' }); },
+  'bm-d': el => { const added = U.toggleBm('d', el.dataset.id); toast(added ? L('दिवस सहेजा गया', 'Day saved') : L('सहेजे गए दिवसों से हटाया गया', 'Removed from saved days')); render(); },
+  'share-day': el => { const d = M().days.find(x => x.id === el.dataset.id); if (d) shareText(`📅 ${fmtMD(d.md)} — ${dT(d)}\n${dH(d)}\n${dF(d).map(f => '• ' + f).join('\n')}\n— MY QUIZ ${L('आज का दिन', 'Today in History')}`); },
 });

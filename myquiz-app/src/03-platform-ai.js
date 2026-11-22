@@ -3,13 +3,13 @@ const CFG = window.MYQUIZ_CONFIG || {};
 // Tester build (demo): content, progress and admin changes stay in this browser, and a bug reporter
 // plus a guided test plan are added. Enable with MYQUIZ_CONFIG.demo or ?demo=1 on a static host.
 const DEMO = !!CFG.demo || /[?&]demo(=1|=true)?(&|$)/.test(location.search);
-const BUILD = String(CFG.build || 'v2.0');
+const BUILD = String(CFG.build || 'v3.0');
 const P = {
   mode: window.claude && typeof window.claude.use === 'function' ? 'artifact' : 'standalone',
   demo: DEMO,
   db: null,  // the artifact database, when this view has one
   cdb: null, // database for content, progress and leaderboard; null keeps them in this browser
-  user: null, sample: null, uid: null,
+  user: null, sample: null, tts: null, downloads: null, uid: null, owner: false,
   isAdmin: false, editor: false, ready: false, progressRemote: false,
 };
 const LOCAL = () => P.mode === 'standalone' || P.demo;
@@ -19,11 +19,12 @@ const aiEndpoint = () => CFG.aiEndpoint || '';
 async function initPlatform() {
   if (P.mode !== 'artifact') { P.ready = true; return; }
   const use = n => Promise.resolve().then(() => window.claude.use(n)).catch(() => null);
-  const [db, user, sample] = await Promise.all([use('db'), use('user'), use('sample')]);
-  P.db = db; P.cdb = P.demo ? null : db; P.user = user; P.sample = sample;
+  const [db, user, sample, tts, downloads] = await Promise.all([use('db'), use('user'), use('sample'), use('tts'), use('downloads')]);
+  P.db = db; P.cdb = P.demo ? null : db; P.user = user; P.sample = sample; P.tts = tts; P.downloads = downloads;
   if (user) {
     try { P.uid = await user.id(); } catch { P.uid = null; }
     try { P.editor = !!db && (await user.canEdit()); } catch { P.editor = false; }
+    try { P.owner = !!(await user.isOwner()); } catch { P.owner = false; }
   }
   P.isAdmin = P.demo ? true : P.editor;
   P.ready = true;

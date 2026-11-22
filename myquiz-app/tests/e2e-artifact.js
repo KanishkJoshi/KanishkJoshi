@@ -56,8 +56,9 @@ const MOCK = () => {
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
 
+  await page.addInitScript(() => { try { if (!localStorage.getItem('mq.progress')) localStorage.setItem('mq.progress', JSON.stringify({ v: 2, onb: true, updatedAt: 1 })); } catch {} });
   await page.goto(BASE + '#home', { waitUntil: 'networkidle' });
-  await page.waitForSelector('.tile');
+  await page.waitForSelector('.dash .next');
   await page.waitForTimeout(300);
   step('mode check (no local admin demo note expected): ' + await page.evaluate(() => typeof window.claude.use));
 
@@ -96,8 +97,8 @@ const MOCK = () => {
   await page.click('form[data-form="publish"] button[type="submit"]'); await page.waitForTimeout(300);
   const pubKeys = await page.evaluate(() => [...window.__store.keys()].filter(k => k.startsWith('pub/q/items/')));
   step('published question docs: ' + pubKeys.length + ' (drafts left: ' + await page.evaluate(() => [...window.__store.keys()].filter(k => k.startsWith('cms/drafts/items/')).length) + ')');
-  await page.goto(BASE + '#quiz'); await page.waitForSelector('[data-s="ca"]');
-  step('CA subject count now: ' + await page.textContent('[data-s="ca"] .count'));
+  await page.goto(BASE + '#subject/ca'); await page.waitForSelector('.sum .row-sub');
+  step('CA subject count now: ' + await page.textContent('.sum .row-sub'));
   // News AI fill
   await page.goto(BASE + '#admin-news'); await page.waitForSelector('#nf-title');
   await page.click('details summary'); await page.fill('#nf-raw', 'यह एक लंबा मूल समाचार लेख है जिसे परीक्षण के लिए पेस्ट किया गया है ताकि AI इससे फ़ॉर्म भर सके। इसमें पर्याप्त अक्षर हैं।');
@@ -112,7 +113,7 @@ const MOCK = () => {
   step('reports visible to admin: ' + (await page.$$('article.draft')).length);
   await page.click('[data-act="report-resolve"]'); await page.waitForTimeout(200);
   step('report items after resolve: ' + await page.evaluate(() => (window.__store.get('reports/u_test1') || {}).items?.length));
-  await page.goto(BASE + '#profile'); await page.waitForSelector('.week');
+  await page.goto(BASE + '#progress'); await page.waitForSelector('.week');
   step('storage line: ' + (await page.textContent('.card p.small.muted:last-of-type')).trim());
   console.log('\nERRORS (' + errors.length + '):\n' + errors.join('\n'));
   await browser.close();

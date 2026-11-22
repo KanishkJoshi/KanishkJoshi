@@ -1,7 +1,7 @@
 // ───────────────────────────── learner progress & reward points ─────────────────────────────
 const DEF = () => ({
   v: 2, name: '', exam: '', goal: 10, best: 0, won: false,
-  days: {}, ans: {}, bm: { q: [], n: [] }, mocks: [], daily: {}, dailySet: null,
+  days: {}, ans: {}, bm: { q: [], n: [], d: [] }, mocks: [], daily: {}, dailySet: null,
   pts: { total: 0, days: {}, log: [] }, // reward points: lifetime total, per-day totals, recent history
   pq: { d: '', ids: [] },               // questions that already earned points today
   fl: { d: '', k: [] },                 // once-per-day bonuses already given today
@@ -12,6 +12,7 @@ const DEF = () => ({
   hist: [],                             // latest answers [{id, ok, ms, t, m}] (m: p practice, e exam, r revision)
   recent: [],                           // recently studied chapters [{ch, t}]
   wc: {},                               // weekly challenge results by week key {score, max, sec, at}
+  t5: {},                               // Aaj ka Din 5-question results by date
   revised: 0,                           // correct answers on due revision questions
   set: { scale: 1, theme: 'system', mode: 'practice', count: 10, lang: 'hi', diff: 0 },
   updatedAt: 0,
@@ -22,9 +23,9 @@ const U = {
   norm(x) {
     const d = DEF();
     const s = { ...d, ...obj(x, {}) };
-    s.bm = { q: Array.isArray(s.bm && s.bm.q) ? s.bm.q : [], n: Array.isArray(s.bm && s.bm.n) ? s.bm.n : [] };
+    s.bm = { q: Array.isArray(s.bm && s.bm.q) ? s.bm.q : [], n: Array.isArray(s.bm && s.bm.n) ? s.bm.n : [], d: Array.isArray(s.bm && s.bm.d) ? s.bm.d : [] };
     s.set = { ...d.set, ...obj(s.set, {}) };
-    for (const k of ['days', 'ans', 'daily', 'badges', 'dok', 'wc']) s[k] = obj(s[k], {});
+    for (const k of ['days', 'ans', 'daily', 'badges', 'dok', 'wc', 't5']) s[k] = obj(s[k], {});
     for (const k of ['mocks', 'hist', 'recent']) if (!Array.isArray(s[k])) s[k] = [];
     s.revised = Number(s.revised) || 0;
     if (s.exam && !EXAMS.some(e => e.id === s.exam)) s.exam = EXAM_OLD[s.exam] || (examOf(s.exam) || {}).id || '';
@@ -107,7 +108,8 @@ const U = {
   record(q, ok, opts = {}) {
     const t = todayISO();
     const a = this.s.ans[q.id] || { c: 0, w: 0, b: 0 };
-    const wasDue = a.w > 0 && (a.b || 0) < SRS_GAPS.length - 1 && (a.due || t) <= t; // a revision question
+    // A revision question: missed before, due now, and last tried on an earlier day (no same-day farming).
+    const wasDue = a.w > 0 && (a.b || 0) < SRS_GAPS.length - 1 && (a.due || t) <= t && !!a.t && isoOf(new Date(a.t)) < t;
     if (ok) { a.c++; a.b = Math.min(SRS_GAPS.length - 1, (a.b || 0) + 1); } else { a.w++; a.b = 0; }
     a.l = ok ? 1 : 0; a.t = Date.now(); a.due = addDays(t, SRS_GAPS[a.b]);
     const ms = clamp(Math.round(Number(opts.ms) || 0), 0, 600000);

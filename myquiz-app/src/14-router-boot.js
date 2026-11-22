@@ -1,18 +1,27 @@
 // ───────────────────────────── router & render ─────────────────────────────
-const ROUTES = { home: vHome, quiz: vQuiz, play: vPlay, result: vResult, ca: vCA, today: vToday, mock: vMock, exam: vExam, 'exam-result': vExamResult, bookmarks: vBookmarks, leaders: vLeaders, profile: vProfile, admin: vAdmin, 'admin-ai': vAdminAI, 'admin-review': vAdminReview, 'admin-publish': vAdminPublish, 'admin-bank': vAdminBank, 'admin-news': vAdminNews, 'admin-days': vAdminDays, 'admin-rewards': vAdminRewards, test: vTest, 'test-inbox': vTestInbox };
-const NO_NAV = new Set(['play', 'result', 'exam', 'exam-result', 'test-inbox', ...ADMIN_ROUTES]);
-let route = 'home';
-const routeFromHash = () => { const h = decodeURIComponent(location.hash.replace(/^#/, '')); return ROUTES[h] ? h : 'home'; };
+const ROUTES = { home: vHome, welcome: vWelcome, learn: vLearn, quiz: vLearn, subject: vSubject, chapter: vChapter, revise: vRevise, cards: vCards, notes: vNotes, compete: vCompete, builder: vBuilder, challenge: vChallenge, progress: vProgress, news: vNews, 'ca-notes': vCaNotes, 'admin-translate': vAdminTranslate, 'admin-analytics': vAdminAnalytics, 'admin-io': vAdminIO, play: vPlay, result: vResult, ca: vCA, today: vToday, mock: vMock, exam: vExam, 'exam-result': vExamResult, bookmarks: vBookmarks, leaders: vLeaders, profile: vProfile, admin: vAdmin, 'admin-ai': vAdminAI, 'admin-review': vAdminReview, 'admin-publish': vAdminPublish, 'admin-bank': vAdminBank, 'admin-news': vAdminNews, 'admin-days': vAdminDays, 'admin-rewards': vAdminRewards, test: vTest, 'test-inbox': vTestInbox };
+const NO_NAV = new Set(['welcome', 'play', 'result', 'exam', 'exam-result', 'cards', 'notes', 'ca-notes', 'test-inbox', ...ADMIN_ROUTES]);
+// Routes look like #chapter/h-mod: the first part picks the screen, the rest is its argument.
+let route = 'home', routeArg = '';
+function parseRoute(h) {
+  h = String(h || '').replace(/^#/, '');
+  try { h = decodeURIComponent(h); } catch { /* keep as is */ }
+  const i = h.indexOf('/'), r = i < 0 ? h : h.slice(0, i), a = i < 0 ? '' : h.slice(i + 1);
+  return ROUTES[r] ? [r, a] : ['home', ''];
+}
+const routeFromHash = () => parseRoute(location.hash);
+function setRoute(r) { [route, routeArg] = parseRoute(r); }
 function go(r) {
-  if (!ROUTES[r]) r = 'home';
-  if (location.hash.replace(/^#/, '') === r) { route = r; render(true); return; }
+  r = String(r || 'home');
+  if (!ROUTES[r.split('/')[0]]) r = 'home';
+  if (location.hash.replace(/^#/, '') === r) { setRoute(r); render(true); return; }
   location.hash = r;
 }
 function redirect(r) {
-  setTimeout(() => { try { history.replaceState(null, '', '#' + r); } catch { /* ignore */ } route = r; render(true); }, 0);
+  setTimeout(() => { try { history.replaceState(null, '', '#' + r); } catch { /* ignore */ } setRoute(r); render(true); }, 0);
   return '<main class="page gutter"></main>';
 }
-window.addEventListener('hashchange', () => { route = routeFromHash(); if (DEMO) T.note('→' + route); closeSheet(); render(true); });
+window.addEventListener('hashchange', () => { stopSpeak(); setRoute(location.hash); if (DEMO) T.note('→' + route); closeSheet(); render(true); });
 
 let renderQueued = false, deferred = false, tickId = 0;
 function scheduleRender() {
@@ -28,7 +37,7 @@ function scheduleRender() {
 function render(routeChanged = false) {
   clearInterval(tickId); tickId = 0;
   const app = $('#app');
-  app.innerHTML = (ROUTES[route] || vHome)();
+  app.innerHTML = (navigator.onLine === false ? `<div class="offline" role="status">${ic('wifi-off')} ${L('आप ऑफ़लाइन हैं — अभ्यास जारी रखें, प्रगति बाद में सिंक होगी।', 'You are offline — keep practising; progress syncs later.')}</div>` : '') + (ROUTES[route] || vHome)();
   app.classList.toggle('no-nav', NO_NAV.has(route));
   app.classList.toggle('exam-pad', route === 'exam');
   if (routeChanged) window.scrollTo(0, 0);
@@ -85,6 +94,7 @@ document.addEventListener('submit', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q-search') renderSearch(t.value);
+  else if (t.id === 'ca-search') { caQuery = t.value; const box = $('#ca-feed'); if (box) box.innerHTML = caFeedHtml(); }
   else if (t.id === 'bank-search') { bankState.term = t.value; bankState.limit = 40; const box = $('#bank-list'); if (box) box.innerHTML = bankListHtml(); }
   if (t.dataset.bind) setBind(t.dataset.bind, t);
 });
@@ -92,6 +102,7 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.chk) updateApproveBtn(t.dataset.chk, t);
   if (t.id === 'mock-agree') { const b = $('#mock-start'); if (b) b.disabled = !t.checked; }
+  if (t.id === 'imp-file' && t.files && t.files[0]) { t.files[0].text().then(x => { IMP.text = x.slice(0, 2000000); IMP.res = parseImport(IMP.text); render(); }).catch(() => toast(L('फ़ाइल पढ़ी नहीं जा सकी।', 'Could not read the file.'), 'err')); }
   if (t.dataset.bind) setBind(t.dataset.bind, t);
   if (t.dataset.change && CHANGES[t.dataset.change]) CHANGES[t.dataset.change](t);
 });
@@ -111,6 +122,8 @@ document.addEventListener('keydown', e => {
   }
 });
 // Save right away when the app goes to the background, so the leaderboard never misses points.
+window.addEventListener('online', () => { render(); toast(L('आप फिर ऑनलाइन हैं', 'You are back online')); });
+window.addEventListener('offline', () => render());
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'hidden') return;
   clearTimeout(U.t); U.flush();
@@ -130,14 +143,16 @@ function boot() {
   const live = document.createElement('div');
   live.id = 'sr-live'; live.className = 'sr'; live.setAttribute('aria-live', 'assertive');
   document.body.appendChild(live);
-  route = routeFromHash();
-  if (LOCAL()) { loadLocalCms(); LB.loadLocal(); seedDemo(); }
+  setRoute(location.hash);
+  if (!U.s.onb && (route === 'home' || !location.hash)) { route = 'welcome'; try { history.replaceState(null, '', '#welcome'); } catch { /* ignore */ } }
+  if (LOCAL()) { loadLocalCms(); LB.loadLocal(); seedDemo(); Object.assign(CMSSET, LS.get('cms.settings', {}) || {}); }
   render(true);
   loadBase();
   initPlatform().then(() => {
     if (P.mode === 'artifact' && !P.demo) {
       subscribeLive(); subscribeCms(); LB.subscribe();
-      U.syncRemote().then(() => LB.queue());
+      try { P.cdb.doc('pub/settings/items/cms').onSnapshot(x => { if (x.exists) Object.assign(CMSSET, x.data() || {}); }, () => { /* optional */ }); } catch { /* optional */ }
+      U.syncRemote().then(() => { LB.queue(); if (route === 'welcome' && U.s.onb) go('home'); });
     }
     if (P.demo) { subscribeInbox(); T.push(); }
     scheduleRender();

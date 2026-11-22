@@ -36,6 +36,7 @@ const SEED = () => {
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   await page.addInitScript(MOCK);
   await page.addInitScript(SEED);
+  await page.addInitScript(() => { try { if (!localStorage.getItem('mq.progress')) localStorage.setItem('mq.progress', JSON.stringify({ v: 2, onb: true, updatedAt: 1 })); } catch {} });
   const store = k => page.evaluate(k => { const v = window.__store.get(k); return v === undefined ? null : JSON.parse(JSON.stringify(v)); }, k);
   const go = async (r, sel) => { await page.evaluate(r => { location.hash = r; }, r); if (sel) await page.waitForSelector(sel); await page.waitForTimeout(150); };
   const names = () => page.$$eval('.pod-name, .lrow .lname', els => els.map(e => e.textContent.trim()));
@@ -43,7 +44,7 @@ const SEED = () => {
   const shot = async n => { if (OUT) await page.screenshot({ path: `${OUT}/${n}.png`, fullPage: true }); };
 
   await page.goto(BASE + '#home');
-  await page.waitForSelector('.tiles .tile');
+  await page.waitForSelector('.dash .next');
   const keys = await page.evaluate(() => window.__keys);
   step('week keys: ' + JSON.stringify(keys));
 
@@ -61,8 +62,8 @@ const SEED = () => {
   await shot('lb-lastweek');
 
   // 2. Points for a first answer, none for repeating the same question the same day.
-  await go('quiz', '[data-s="history"]');
-  await page.click('[data-s="history"]');
+  await go('subject/history', '[data-s="history"]');
+  await page.click('[data-act="start-subject"][data-s="history"]');
   await page.waitForSelector('.qtext');
   const qtext = (await page.textContent('.qtext')).trim();
   await page.click('.opt >> nth=0');
@@ -72,7 +73,7 @@ const SEED = () => {
   const pop = (await page.textContent('.explain .pts-pop')).trim();
   step(`first answer ${firstRight ? 'right' : 'wrong'} → ${pop}`);
   check(pop.startsWith(firstRight ? '+10' : '+1'), 'points shown for the first answer');
-  await go('quiz', '[data-act="search-open"]');
+  await go('subject/history', '[data-act="search-open"]');
   await page.click('[data-act="search-open"]');
   await page.fill('#q-search', qtext.slice(0, 18));
   await page.waitForSelector('#search-results .row');
@@ -94,9 +95,9 @@ const SEED = () => {
   await page.click('[data-act="set-lang"][data-v="en"]');
   await page.waitForTimeout(200);
   check(await page.evaluate(() => document.documentElement.lang) === 'en', '<html lang> = en');
-  check((await page.textContent('.appbar h1')).trim() === 'Profile', 'profile title in English');
-  check((await page.$$eval('.bnav a span', els => els.map(e => e.textContent).join('|'))) === 'Home|Quiz|Leaders|Saved|Profile', 'bottom nav in English');
-  for (const r of ['home', 'quiz', 'ca', 'today', 'mock', 'leaders', 'bookmarks']) {
+  check((await page.textContent('.appbar h1')).trim() === 'Profile & settings', 'profile title in English');
+  check((await page.$$eval('.bnav a span', els => els.map(e => e.textContent).join('|'))) === 'Home|Learn|Compete|Progress', 'bottom nav in English');
+  for (const r of ['home', 'learn', 'subject/history', 'chapter/h-mod', 'revise', 'compete', 'builder', 'progress', 'ca', 'today', 'mock', 'leaders', 'bookmarks']) {
     await go(r, '#app main');
     const t = await page.evaluate(() => { const a = document.querySelector('#app').cloneNode(true); a.querySelectorAll('.lang-btn, [data-act="set-lang"]').forEach(b => b.remove()); return a.innerText; });
     const hit = (t.match(/[^\n]*[ऀ-ॿ][^\n]*/) || [''])[0];
@@ -105,8 +106,8 @@ const SEED = () => {
   }
   await page.waitForTimeout(1800);
   check(((await store('data/users/u_test1/progress')) || {}).set.lang === 'en', 'language saved with the learner\'s progress');
-  await go('quiz', '[data-s="polity"]');
-  await page.click('[data-s="polity"]');
+  await go('subject/polity', '[data-s="polity"]');
+  await page.click('[data-act="start-subject"][data-s="polity"]');
   await page.waitForSelector('.qtext');
   check(!DEV.test(await page.textContent('.qtext')) && !DEV.test(await page.textContent('.opts')), 'question and options in English');
   await page.click('.opt >> nth=1');
@@ -170,7 +171,7 @@ const SEED = () => {
   await shot('lb-week-en');
 
   // 6. Points history and badges in Profile.
-  await go('profile', '[data-act="pts-history"]');
+  await go('progress', '[data-act="pts-history"]');
   await page.click('[data-act="pts-history"]');
   await page.waitForSelector('.sheet .earn li');
   check((await page.$$('.sheet .earn li')).length >= 1, 'points history lists entries');

@@ -99,7 +99,12 @@ function vExamResult() {
     const ok = s.sel === q.a;
     return `<div class="review-item"><b>${i + 1}. ${esc(qT(q))}</b><span class="ans">${L('सही उत्तर', 'Correct answer')}: <span class="ans-ok">${esc(o[q.a])}</span></span>${ok ? `<span class="ans ans-ok">+${ex.pos}</span>` : `<span class="ans">${L('आपका उत्तर', 'Your answer')}: <span class="ans-bad">${esc(yours)}</span>${s.sel == null ? '' : ` <span class="ans-bad">(−${ex.neg})</span>`}</span>`}<span class="small muted">${esc(qE(q) || '')}</span></div>`;
   }).join('');
-  return `${appbar(L('परीक्षा परिणाम', 'Test result'), { back: 'mock' })}
+  const tm = ex.tm || {}, answered = ex.qs.filter(id => (ex.st[id] || {}).sel != null);
+  const avg = answered.length ? Math.round(answered.reduce((x, id) => x + (tm[id] || 0), 0) / answered.length / 1000) : 0;
+  const slow = ex.qs.filter(id => tm[id]).sort((a, b) => tm[b] - tm[a]).slice(0, 3).map(id => examQ(id, ex)).filter(Boolean);
+  const opp = ex.kind === 'friend' && ex.meta && ex.meta.opp;
+  const retake = MOCKS.some(mk => mk.id === ex.id) ? `<button class="btn btn-cta" data-act="mock-intro" data-id="${esc(ex.id)}">${ic('rotate')} ${L('फिर से दें', 'Retake')}</button>` : `<button class="btn btn-cta" data-act="exam-retake">${ic('rotate')} ${L('फिर से दें', 'Retake')}</button>`;
+  return `${appbar(L('परीक्षा परिणाम', 'Test result'), { back: ex.back || 'mock' })}
 <main class="page gutter">
   <section class="card result-hero">
     <div class="big-ring">${ring(p, 150, 12, p >= 0.5 ? 'var(--ring)' : 'var(--bad-solid)')}<b class="tnum">${fmtScore(R.score)}<small>/ ${R.max} ${L('अंक', 'marks')}</small></b></div>
@@ -107,13 +112,21 @@ function vExamResult() {
     <p class="muted" style="margin:0">${L('नेगेटिव मार्किंग सहित स्कोर', 'Score after negative marking')}</p>
     ${R.pts != null ? `<span class="pill pill-gold">${ic('coins')} +${fmtNum(R.pts)} ${L('पॉइंट्स', 'points')}</span>${R.bonus ? `<span class="small muted">${L(`इसमें मॉक बोनस +${R.bonus} शामिल`, `Includes a mock bonus of +${R.bonus}`)}</span>` : ''}` : ''}
   </section>
+  ${opp ? `<section class="card next"><span class="k">${L('दोस्त से तुलना', 'You vs your friend')}</span><h3>${R.score > opp.sc ? L('आप जीत गए! 🎉', 'You won! 🎉') : R.score === opp.sc ? L('बराबरी!', 'It\'s a tie!') : L(`${opp.n || 'दोस्त'} आगे रहे — फिर कोशिश करें`, `${opp.n || 'Your friend'} is ahead — try again`)}</h3>
+    <p>${L('आप', 'You')}: <b>${fmtScore(R.score)}/${R.max}</b> (${fmtSecs(R.timeSec)}) · ${esc(opp.n || L('दोस्त', 'Friend'))}: <b>${fmtScore(opp.sc)}/${opp.max}</b>${opp.sec ? ` (${fmtSecs(opp.sec)})` : ''}</p>
+    <button class="btn btn-cta btn-block" data-act="friend-share">${ic('share')} ${L('अपना स्कोर वापस भेजें', 'Send your score back')}</button></section>` : ''}
+  ${ex.kind === 'friend' && !opp ? `<section class="card next"><span class="k">${L('दोस्त को चुनौती', 'Challenge a friend')}</span><h3>${L('अब दोस्त की बारी!', 'Now it\'s your friend\'s turn!')}</h3><p>${L('लिंक/कोड भेजें — दोस्त यही प्रश्न हल करेगा और दोनों के स्कोर की तुलना होगी।', 'Send the link/code — your friend answers the same questions and you compare scores.')}</p><button class="btn btn-cta btn-block" data-act="friend-share">${ic('share')} ${L('चुनौती भेजें', 'Send the challenge')}</button></section>` : ''}
+  ${ex.kind === 'wchal' ? `<div class="note">${ic('swords')}<div>${R.firstTry ? L(`साप्ताहिक चुनौती का आपका आधिकारिक स्कोर ${fmtScore(R.score)}/${R.max} दर्ज हुआ।`, `Your official weekly challenge score of ${fmtScore(R.score)}/${R.max} is recorded.`) : L('यह अभ्यास प्रयास था — आधिकारिक स्कोर पहला प्रयास ही रहता है।', 'This was a practice attempt — your official score is your first attempt.')}</div></div>` : ''}
   <div class="stats">
     <div class="stat s-ok"><b>${R.c}</b><span>${L('सही', 'Correct')}</span></div><div class="stat s-bad"><b>${R.w}</b><span>${L('गलत', 'Wrong')}</span></div><div class="stat"><b>${R.u}</b><span>${L('छोड़े', 'Skipped')}</span></div>
     <div class="stat"><b>${pct(R.c, R.c + R.w)}%</b><span>${L('सटीकता', 'Accuracy')}</span></div><div class="stat"><b>${R.c + R.w}/${R.n}</b><span>${L('प्रयास', 'Attempted')}</span></div><div class="stat"><b class="tnum">${fmtSecs(R.timeSec)}</b><span>${L('समय', 'Time')}</span></div>
   </div>
+  <section class="card" style="display:flex;flex-direction:column;gap:8px"><h2 class="sec-title" style="font-size:1.05rem">${ic('clock')} ${L('समय विश्लेषण', 'Time analysis')}</h2>
+    <p class="small" style="margin:0">${L(`औसत ${avg} सेकंड प्रति हल किया प्रश्न। सही उत्तर पर +${ex.pos}, गलत पर −${fmtScore(ex.neg)}।`, `Average ${avg} seconds per answered question. +${ex.pos} per right answer, −${fmtScore(ex.neg)} per wrong one.`)}</p>
+    ${slow.length ? `<span class="small muted">${L('सबसे ज़्यादा समय लिया', 'Took the longest')}:</span><ul class="small" style="margin:0;padding-left:1.2em">${slow.map(q => `<li>${esc(qT(q).slice(0, 80))}${qT(q).length > 80 ? '…' : ''} — ${Math.round((tm[q.id] || 0) / 1000)} ${L('से.', 's')}</li>`).join('')}</ul>` : ''}</section>
   <section class="card"><h2 class="sec-title" style="font-size:1.05rem;margin-bottom:12px">${ic('chart')} ${L('विषयवार प्रदर्शन', 'Subject-wise performance')}</h2><div class="bars">${bars}</div></section>
   <section><h2 class="sec-title" style="margin-bottom:10px">${ic('list')} ${L('समाधान', 'Solutions')}</h2><div class="list">${sol}</div></section>
-  <div class="grid2"><button class="btn btn-cta" data-act="mock-intro" data-id="${esc(ex.id)}">${ic('rotate')} ${L('फिर से दें', 'Retake')}</button><a class="btn btn-grey" href="#mock">${L('सभी परीक्षाएँ', 'All tests')}</a></div>
+  <div class="grid2">${retake}<a class="btn btn-grey" href="#compete">${L('मुक़ाबला', 'Compete')}</a></div>
 </main>`;
 }
 
@@ -125,11 +138,13 @@ function vBookmarks() {
   const qList = qs.length
     ? `<button class="btn btn-cta" data-act="start-bookmarked">${ic('play')} ${L(`इन ${qs.length} प्रश्नों का अभ्यास करें`, `Practise these ${qs.length} questions`)}</button><div class="list">${qs.map(q => `<div class="review-item"><b>${esc(qT(q))}</b><span class="ans">${L('उत्तर', 'Answer')}: <span class="ans-ok">${esc(qO(q)[q.a])}</span></span><span class="small muted">${esc(subjName(q.s))}</span><div><button class="link" data-act="bm-q" data-id="${esc(q.id)}" style="color:var(--bad)">${ic('trash')} ${L('हटाएँ', 'Remove')}</button></div></div>`).join('')}</div>`
     : `<div class="card">${emptyState('bookmark', L('अभी कोई प्रश्न सहेजा नहीं गया', 'No saved questions yet'), L('क्विज खेलते समय "बुकमार्क" दबाकर कठिन प्रश्न यहाँ सहेजें।', 'Tap "Save" during a quiz to keep tricky questions here.'))}</div>`;
+  const ds = U.s.bm.d.map(id => m.days.find(d => d.id === id)).filter(Boolean);
+  const dList = ds.length ? `<div class="list">${ds.map(d => `<button class="row" data-act="day-goto" data-iso="${parseISO(todayISO()).getFullYear()}-${d.md}"><span class="row-ic" style="--c:var(--brand)">${ic('calendar')}</span><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(dT(d))}</span><span class="row-sub">${fmtMD(d.md)} · ${esc(kindLabel(d.k))}</span></span>${ic('chev-right', 'chev')}</button>`).join('')}</div>` : `<div class="card">${emptyState('calendar', L('कोई दिवस सहेजा नहीं गया', 'No saved days'), L('"आज का दिन" में "सहेजें" दबाएँ।', 'Tap "Save" in Today in History.'))}</div>`;
   const nList = ns.length ? ns.map(newsCard).join('') : `<div class="card">${emptyState('newspaper', L('कोई ख़बर सहेजी नहीं गई', 'No saved news'), L('करेंट अफेयर्स में किसी ख़बर को खोलकर "सहेजें" दबाएँ।', 'Open a current-affairs story and tap "Save".'))}</div>`;
-  return `${appbar(`${ic('bookmark')} ${L('बुकमार्क', 'Saved')}`)}
+  return `${appbar(`${ic('bookmark')} ${L('बुकमार्क', 'Saved')}`, { back: 'revise' })}
 <main class="page gutter">
-  <div class="seg" role="group" aria-label="${L('बुकमार्क प्रकार', 'Saved items')}"><button data-act="bm-tab" data-v="q" aria-pressed="${bmTab === 'q'}">${L('प्रश्न', 'Questions')} (${qs.length})</button><button data-act="bm-tab" data-v="n" aria-pressed="${bmTab === 'n'}">${L('समाचार', 'News')} (${ns.length})</button></div>
-  ${bmTab === 'q' ? qList : nList}
+  <div class="seg" style="grid-template-columns:repeat(3,minmax(0,1fr))" role="group" aria-label="${L('बुकमार्क प्रकार', 'Saved items')}"><button data-act="bm-tab" data-v="q" aria-pressed="${bmTab === 'q'}">${L('प्रश्न', 'Questions')} (${qs.length})</button><button data-act="bm-tab" data-v="n" aria-pressed="${bmTab === 'n'}">${L('समाचार', 'News')} (${ns.length})</button><button data-act="bm-tab" data-v="d" aria-pressed="${bmTab === 'd'}">${L('दिवस', 'Days')} (${ds.length})</button></div>
+  ${bmTab === 'q' ? qList : bmTab === 'd' ? dList : nList}
 </main>
 ${bottomNav('bookmarks')}`;
 }
@@ -233,26 +248,23 @@ function openPointsHistory() {
   ${log.length ? `<ul class="earn">${log.slice(0, 40).map(e => { const r = PTS_REASON[e.r] || [e.r, e.r]; return `<li><span class="earn-ic">${ic('coins')}</span><span class="row-main"><b>${L(r[0], r[1])}${e.c > 1 ? ` <span class="small muted">×${e.c}</span>` : ''}</b><span class="row-sub">${relTime(e.t)}</span></span><span class="pts">+${fmtNum(e.n)}</span></li>`; }).join('')}</ul>` : emptyState('coins', L('अभी कोई पॉइंट्स नहीं', 'No points yet'), L('क्विज खेलकर पॉइंट्स कमाना शुरू करें।', 'Play a quiz to start earning points.'))}`, { label: L('पॉइंट्स इतिहास', 'Points history') });
 }
 
-function weekBars() {
+function weekBars(mini = false) {
   const t = todayISO(), goal = U.s.goal || 10;
   const days = Array.from({ length: 7 }, (_, i) => addDays(t, i - 6));
   const counts = days.map(d => U.s.days[d] || 0);
   const max = Math.max(goal, ...counts);
-  return `<div class="week" role="img" aria-label="${L('पिछले 7 दिनों में हल किए प्रश्न', 'Questions answered in the last 7 days')}: ${counts.join(', ')}"><span class="goal-line" style="bottom:${(goal / max) * 100 * 0.72 + 14}%"></span>${days.map((d, i) => `<div class="col"><em>${counts[i] || ''}</em><span class="b ${counts[i] >= goal ? 'met' : ''}" style="height:${Math.max(3, (counts[i] / max) * 72)}%"></span><span>${d === t ? L('आज', 'Today') : WEEKDAYS_SHORT[LANG][parseISO(d).getDay()]}</span></div>`).join('')}</div>`;
+  return `<div class="week${mini ? ' mini' : ''}" role="img" aria-label="${L('पिछले 7 दिनों में हल किए प्रश्न', 'Questions answered in the last 7 days')}: ${counts.join(', ')}"><span class="goal-line" style="bottom:${(goal / max) * 100 * 0.72 + 14}%"></span>${days.map((d, i) => `<div class="col"><em>${counts[i] || ''}</em><span class="b ${counts[i] >= goal ? 'met' : ''}" style="height:${Math.max(3, (counts[i] / max) * 72)}%"></span><span>${d === t ? L('आज', 'Today') : WEEKDAYS_SHORT[LANG][parseISO(d).getDay()]}</span></div>`).join('')}</div>`;
 }
 const lbForm = { name: null };
 function vProfile() {
   const tot = U.totals(), st = U.streak(), s = U.s;
   const name = s.name.trim();
   const t = todayISO();
-  const subj = SUBJECTS.map(sj => { const x = U.subjStats(sj.k); return `<div class="bar-row" style="--c:${sj.c}"><span>${subjName(sj.k)}</span><span class="track"><i style="width:${pct(x.right, x.total)}%"></i></span><b>${pct(x.right, x.total)}%</b></div>`; }).join('');
   const where = LOCAL() ? L('इसी डिवाइस के ब्राउज़र में', 'in this device\'s browser') : P.progressRemote ? L('आपके खाते में (हर डिवाइस पर)', 'in your account (on every device)') : L('इसी ब्राउज़र में', 'in this browser');
   const scales = [[0.9, 'छोटा', 'Small'], [1, 'सामान्य', 'Normal'], [1.12, 'बड़ा', 'Large'], [1.25, 'बहुत बड़ा', 'Extra large']];
-  const earned = BADGES.filter(b => s.badges[b.id]).length;
-  const badges = BADGES.map(b => { const d = s.badges[b.id]; return `<li class="bdg${d ? ' got' : ''}" title="${esc(L(b.dhi, b.den))}"><span class="bdg-ic">${ic(d ? b.icon : 'lock')}</span><b>${esc(L(b.hi, b.en))}</b><span>${d ? fmtDate(d) : esc(L(b.dhi, b.den))}</span></li>`; }).join('');
   const rank = LB.myRank('week');
   const lbName = lbForm.name ?? s.lb.name;
-  return `${appbar(`${ic('user')} ${L('प्रोफ़ाइल', 'Profile')}`)}
+  return `${appbar(`${ic('user')} ${L('प्रोफ़ाइल और सेटिंग्स', 'Profile & settings')}`, { back: 'home' })}
 <main class="page gutter">
   <section class="card admin-hero" style="display:flex;align-items:center;gap:14px">
     <span class="avatar" style="width:58px;height:58px;font-size:1.5rem">${name ? esc(initial(name)) : ic('user')}</span>
@@ -265,16 +277,11 @@ function vProfile() {
     <div class="stats stats-4"><div class="stat"><b>${fmtNum(U.ptsToday())}</b><span>${L('आज', 'Today')}</span></div><div class="stat"><b>${fmtNum(U.ptsWeek(weekKey(t)))}</b><span>${L('इस सप्ताह', 'This week')}</span></div><div class="stat"><b>${fmtNum(U.ptsMonth(monthKey(t)))}</b><span>${L('इस महीने', 'This month')}</span></div><div class="stat"><b>${rank ? '#' + rank : '–'}</b><span>${L('सप्ताह रैंक', 'Week rank')}</span></div></div>
     <div class="btnrow"><a class="btn btn-sm btn-outline" href="#leaders">${ic('trophy')} ${L('लीडरबोर्ड', 'Leaderboard')}</a><button class="btn btn-sm btn-outline" data-act="pts-info">${ic('info')} ${L('पॉइंट्स कैसे मिलते हैं', 'How points work')}</button></div>
   </section>
-  <div class="stats">
-    <div class="stat"><b>${tot.attempts}</b><span>${L('कुल उत्तर', 'Answers')}</span></div><div class="stat s-ok"><b>${tot.acc}%</b><span>${L('सटीकता', 'Accuracy')}</span></div><div class="stat"><b>${earned}/${BADGES.length}</b><span>${L('बैज', 'Badges')}</span></div>
-    <div class="stat"><b>${st}</b><span>${L('स्ट्रीक (दिन)', 'Streak (days)')}</span></div><div class="stat"><b>${s.best || 0}</b><span>${L('सर्वश्रेष्ठ स्ट्रीक', 'Best streak')}</span></div><div class="stat"><b>${s.mocks.length}</b><span>${L('मॉक टेस्ट', 'Mock tests')}</span></div>
-  </div>
-  <section class="card"><h2 class="sec-title" style="font-size:1.05rem;margin-bottom:12px">${ic('award')} ${L('बैज', 'Badges')}</h2><ul class="bdgs">${badges}</ul></section>
-  <section class="card"><div class="sec-head" style="margin-bottom:6px"><h2 class="sec-title" style="font-size:1.05rem">${ic('chart')} ${L('पिछले 7 दिन', 'Last 7 days')}</h2><span class="small muted">${L(`लक्ष्य: ${s.goal}/दिन`, `Goal: ${s.goal}/day`)}</span></div>${weekBars()}<p class="small muted" style="margin:8px 0 0">${L(`रोज़ कम से कम ${STREAK_MIN} प्रश्न हल करने पर स्ट्रीक बढ़ती है।`, `Answer at least ${STREAK_MIN} questions a day to grow your streak.`)}</p></section>
-  <section class="card"><h2 class="sec-title" style="font-size:1.05rem;margin-bottom:12px">${ic('target')} ${L('विषयवार महारत', 'Subject mastery')}</h2><div class="bars">${subj}</div><p class="small muted" style="margin:10px 0 0">${L('हर विषय में पिछली बार सही हल किए प्रश्नों का प्रतिशत।', 'Share of questions in each subject you got right last time.')}</p></section>
+  <a class="act" href="#progress"><span class="ai">${ic('chart')}</span><span>${L('मेरी प्रगति', 'My progress')}<span class="row-sub">${L(`स्तर ${levelOf(s.pts.total).lvl} · सटीकता ${tot.acc}% · ${st} दिन की स्ट्रीक · बैज और विषयवार महारत`, `Level ${levelOf(s.pts.total).lvl} · ${tot.acc}% accuracy · ${st}-day streak · badges and subject mastery`)}</span></span>${ic('chev-right', 'chev')}</a>
   <section class="card" id="settings" style="display:flex;flex-direction:column;gap:14px">
     <h2 class="sec-title" style="font-size:1.05rem">${ic('sliders')} ${L('सेटिंग्स', 'Settings')}</h2>
     <div class="field"><span class="lbl">${ic('languages')} ${L('भाषा / Language', 'Language / भाषा')}</span><div class="chips">${[['hi', 'हिंदी'], ['en', 'English']].map(([v, l]) => `<button class="chip" data-act="set-lang" data-v="${v}" aria-pressed="${LANG === v}" lang="${v}">${l}</button>`).join('')}</div><span class="small muted">${L('प्रश्न, समाचार और पूरा ऐप चुनी गई भाषा में दिखेगा।', 'Questions, news and the whole app appear in the chosen language.')}</span></div>
+    <div class="field"><span class="lbl">${ic('graduation')} ${L('लक्ष्य परीक्षा', 'Target exam')}</span><div class="chips wrap">${EXAMS.map(e => `<button class="chip" data-act="set-exam" data-v="${e.id}" aria-pressed="${s.exam === e.id}">${esc(L(e.hi, e.en))}</button>`).join('')}</div></div>
     <div class="field"><span class="lbl">${L('रोज़ का लक्ष्य', 'Daily goal')}</span><div class="chips wrap">${[10, 20, 30].map(n => `<button class="chip" data-act="set-goal" data-v="${n}" aria-pressed="${s.goal === n}">${n} ${L('प्रश्न', 'questions')}</button>`).join('')}</div></div>
     <div class="field"><span class="lbl">${ic('type')} ${L('अक्षरों का आकार', 'Text size')}</span><div class="chips wrap">${scales.map(([v, hi, en]) => `<button class="chip" data-act="set-scale" data-v="${v}" aria-pressed="${Number(s.set.scale) === v}">${L(hi, en)}</button>`).join('')}</div></div>
     ${P.mode === 'standalone' ? `<div class="field"><span class="lbl">${ic('moon')} ${L('थीम', 'Theme')}</span><div class="chips">${[['system', 'सिस्टम', 'System'], ['light', 'लाइट', 'Light'], ['dark', 'डार्क', 'Dark']].map(([v, hi, en]) => `<button class="chip" data-act="set-theme" data-v="${v}" aria-pressed="${s.set.theme === v}">${L(hi, en)}</button>`).join('')}</div></div>` : ''}
@@ -296,7 +303,7 @@ function profileSheet() {
   onb.exam = U.s.exam; onb.goal = U.s.goal;
   openSheet(`${sheetHead(L('प्रोफ़ाइल बदलें', 'Edit profile'))}<form data-form="profile" style="display:flex;flex-direction:column;gap:14px">
   <div class="field"><label for="pf-name">${L('आपका नाम', 'Your name')}</label><input class="input" id="pf-name" maxlength="40" value="${esc(U.s.name)}" autocomplete="given-name"></div>
-  <div class="field"><span class="lbl">${L('लक्ष्य परीक्षा', 'Target exam')}</span><div class="chips wrap" id="pf-exam">${EXAMS.map(([v, en]) => `<button type="button" class="chip" data-act="onb-exam" data-v="${esc(v)}" aria-pressed="${onb.exam === v}">${esc(L(v, en))}</button>`).join('')}</div></div>
+  <div class="field"><span class="lbl">${L('लक्ष्य परीक्षा', 'Target exam')}</span><div class="chips wrap" id="pf-exam">${EXAMS.map(e => `<button type="button" class="chip" data-act="onb-exam" data-v="${e.id}" aria-pressed="${onb.exam === e.id}">${esc(L(e.hi, e.en))}</button>`).join('')}</div></div>
   <button class="btn btn-cta btn-block" type="submit">${ic('check')} ${L('सहेजें', 'Save')}</button></form>`, { label: L('प्रोफ़ाइल बदलें', 'Edit profile') });
 }
 

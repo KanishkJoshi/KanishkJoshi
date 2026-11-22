@@ -21,7 +21,7 @@ const shot = async (page, name) => { await page.waitForTimeout(250); await page.
   step('strip: ' + (await page.textContent('.demo-strip')).replace(/\s+/g, ' ').trim());
   await shot(page, 'd1-home-demo');
   // sticky offsets: scroll a long page and check the appbar sits below the strip
-  await page.goto(BASE + '?demo=1#quiz'); await page.waitForSelector('.appbar');
+  await page.goto(BASE + '?demo=1#learn'); await page.waitForSelector('.appbar');
   await page.evaluate(() => window.scrollTo(0, 400)); await page.waitForTimeout(150);
   const tops = await page.evaluate(() => ({ strip: document.querySelector('#demo-root').getBoundingClientRect().top, bar: document.querySelector('.appbar').getBoundingClientRect().top, stripH: document.querySelector('#demo-root').getBoundingClientRect().height }));
   step(`sticky: strip top ${tops.strip}, appbar top ${tops.bar}, strip height ${tops.stripH}`);
@@ -51,7 +51,7 @@ const shot = async (page, name) => { await page.waitForTimeout(250); await page.
   step('clipboard has report: ' + clip.includes('टेस्टर: प्रिया') + ' | screen line: ' + (clip.split('\n').find(l => l.startsWith('स्क्रीन')) || ''));
   await page.keyboard.press('Escape');
   // bug from the strip while playing a quiz (context should name the question)
-  await page.goto(BASE + '?demo=1#quiz'); await page.click('[data-act="start-subject"][data-s="history"]'); await page.waitForSelector('.qtext');
+  await page.goto(BASE + '?demo=1#subject/history'); await page.click('[data-act="start-subject"][data-s="history"]'); await page.waitForSelector('.qtext');
   await page.click('.demo-strip [data-act="bug-open"]'); await page.waitForSelector('form[data-form="bug"]');
   step('play context: ' + (await page.textContent('.sheet .note b')).slice(0, 60));
   await page.fill('#bg-title', 'परीक्षण'); await page.fill('#bg-what', 'केवल परीक्षण के लिए रिपोर्ट');
@@ -94,6 +94,7 @@ const shot = async (page, name) => { await page.waitForTimeout(250); await page.
   p2.on('console', m => { if (m.type() === 'error') errors.push('B console: ' + m.text()); });
   p2.on('pageerror', e => errors.push('B pageerror: ' + e.message));
   await p2.goto(BASE + '#home', { waitUntil: 'networkidle' }); await p2.waitForSelector('.demo-strip'); await p2.waitForTimeout(300);
+  if (await p2.$('.onb-page')) { await p2.click('[data-act="wz-finish"]'); await p2.waitForSelector('.dash .next'); }
   // learner activity + admin publish must stay local
   await p2.click('[data-act="start-daily"]'); await p2.waitForSelector('.opt'); await (await p2.$$('.opt'))[0].click(); await p2.waitForTimeout(1800);
   await p2.goto(BASE + '#admin-review'); await p2.waitForSelector('article.draft');

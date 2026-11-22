@@ -210,13 +210,13 @@ const CFG = window.MYQUIZ_CONFIG || {};
 // Tester build (demo): content, progress and admin changes stay in this browser, and a bug reporter
 // plus a guided test plan are added. Enable with MYQUIZ_CONFIG.demo or ?demo=1 on a static host.
 const DEMO = !!CFG.demo || /[?&]demo(=1|=true)?(&|$)/.test(location.search);
-const BUILD = String(CFG.build || 'v2.0');
+const BUILD = String(CFG.build || 'v3.0');
 const P = {
   mode: window.claude && typeof window.claude.use === 'function' ? 'artifact' : 'standalone',
   demo: DEMO,
   db: null,  // the artifact database, when this view has one
   cdb: null, // database for content, progress and leaderboard; null keeps them in this browser
-  user: null, sample: null, uid: null,
+  user: null, sample: null, tts: null, downloads: null, uid: null, owner: false,
   isAdmin: false, editor: false, ready: false, progressRemote: false,
 };
 const LOCAL = () => P.mode === 'standalone' || P.demo;
@@ -226,11 +226,12 @@ const aiEndpoint = () => CFG.aiEndpoint || '';
 async function initPlatform() {
   if (P.mode !== 'artifact') { P.ready = true; return; }
   const use = n => Promise.resolve().then(() => window.claude.use(n)).catch(() => null);
-  const [db, user, sample] = await Promise.all([use('db'), use('user'), use('sample')]);
-  P.db = db; P.cdb = P.demo ? null : db; P.user = user; P.sample = sample;
+  const [db, user, sample, tts, downloads] = await Promise.all([use('db'), use('user'), use('sample'), use('tts'), use('downloads')]);
+  P.db = db; P.cdb = P.demo ? null : db; P.user = user; P.sample = sample; P.tts = tts; P.downloads = downloads;
   if (user) {
     try { P.uid = await user.id(); } catch { P.uid = null; }
     try { P.editor = !!db && (await user.canEdit()); } catch { P.editor = false; }
+    try { P.owner = !!(await user.isOwner()); } catch { P.owner = false; }
   }
   P.isAdmin = P.demo ? true : P.editor;
   P.ready = true;
@@ -550,7 +551,7 @@ const CMS = {
   saveLocal() { LS.set('cms.pub', C.pub); LS.set('cms.drafts', C.drafts); LS.set('cms.reports', C.reports); },
   async putDraft(d) {
     const now = Date.now();
-    const doc = clone({ ...d, id: d.id || rid(), createdAt: d.createdAt || now, updatedAt: now });
+    const doc = clone({ ...d, id: d.id || rid(), by: d.by || P.uid || 'local', createdAt: d.createdAt || now, updatedAt: now });
     if (P.cdb) await P.cdb.doc(`cms/drafts/items/${doc.id}`).set(doc);
     else { const i = C.drafts.findIndex(x => x.id === doc.id); if (i >= 0) C.drafts[i] = doc; else C.drafts.push(doc); this.saveLocal(); bump(); }
     return doc;
@@ -565,7 +566,9 @@ const CMS = {
     else { const arr = C.pub[coll]; const i = arr.findIndex(x => x.id === doc.id); if (i >= 0) arr[i] = doc; else arr.push(doc); this.saveLocal(); bump(); }
   },
   async publish(d, publishAt) {
-    const coll = COLL[d.type];
+    const coll = COLL[d.type], id = d.data.id || 'x' + d.id;
+    const prev = (C.pub[coll] || []).find(x => x.id === id) || (C.base[coll] || []).find(x => x.id === id);
+    if (prev && !prev.hidden) { try { await pushHistory(id, prev); } catch { /* history is best-effort */ } }
     await this.putPub(coll, { ...d.data, id: d.data.id || 'x' + d.id, publishAt, publishedAt: Date.now() });
     await this.delDraft(d.id);
   },
@@ -599,7 +602,7 @@ const CMS = {
 // ───────────────────────────── learner progress & reward points ─────────────────────────────
 const DEF = () => ({
   v: 2, name: '', exam: '', goal: 10, best: 0, won: false,
-  days: {}, ans: {}, bm: { q: [], n: [] }, mocks: [], daily: {}, dailySet: null,
+  days: {}, ans: {}, bm: { q: [], n: [], d: [] }, mocks: [], daily: {}, dailySet: null,
   pts: { total: 0, days: {}, log: [] }, // reward points: lifetime total, per-day totals, recent history
   pq: { d: '', ids: [] },               // questions that already earned points today
   fl: { d: '', k: [] },                 // once-per-day bonuses already given today
@@ -610,6 +613,7 @@ const DEF = () => ({
   hist: [],                             // latest answers [{id, ok, ms, t, m}] (m: p practice, e exam, r revision)
   recent: [],                           // recently studied chapters [{ch, t}]
   wc: {},                               // weekly challenge results by week key {score, max, sec, at}
+  t5: {},                               // Aaj ka Din 5-question results by date
   revised: 0,                           // correct answers on due revision questions
   set: { scale: 1, theme: 'system', mode: 'practice', count: 10, lang: 'hi', diff: 0 },
   updatedAt: 0,
@@ -620,9 +624,9 @@ const U = {
   norm(x) {
     const d = DEF();
     const s = { ...d, ...obj(x, {}) };
-    s.bm = { q: Array.isArray(s.bm && s.bm.q) ? s.bm.q : [], n: Array.isArray(s.bm && s.bm.n) ? s.bm.n : [] };
+    s.bm = { q: Array.isArray(s.bm && s.bm.q) ? s.bm.q : [], n: Array.isArray(s.bm && s.bm.n) ? s.bm.n : [], d: Array.isArray(s.bm && s.bm.d) ? s.bm.d : [] };
     s.set = { ...d.set, ...obj(s.set, {}) };
-    for (const k of ['days', 'ans', 'daily', 'badges', 'dok', 'wc']) s[k] = obj(s[k], {});
+    for (const k of ['days', 'ans', 'daily', 'badges', 'dok', 'wc', 't5']) s[k] = obj(s[k], {});
     for (const k of ['mocks', 'hist', 'recent']) if (!Array.isArray(s[k])) s[k] = [];
     s.revised = Number(s.revised) || 0;
     if (s.exam && !EXAMS.some(e => e.id === s.exam)) s.exam = EXAM_OLD[s.exam] || (examOf(s.exam) || {}).id || '';
@@ -705,7 +709,8 @@ const U = {
   record(q, ok, opts = {}) {
     const t = todayISO();
     const a = this.s.ans[q.id] || { c: 0, w: 0, b: 0 };
-    const wasDue = a.w > 0 && (a.b || 0) < SRS_GAPS.length - 1 && (a.due || t) <= t; // a revision question
+    // A revision question: missed before, due now, and last tried on an earlier day (no same-day farming).
+    const wasDue = a.w > 0 && (a.b || 0) < SRS_GAPS.length - 1 && (a.due || t) <= t && !!a.t && isoOf(new Date(a.t)) < t;
     if (ok) { a.c++; a.b = Math.min(SRS_GAPS.length - 1, (a.b || 0) + 1); } else { a.w++; a.b = 0; }
     a.l = ok ? 1 : 0; a.t = Date.now(); a.due = addDays(t, SRS_GAPS[a.b]);
     const ms = clamp(Math.round(Number(opts.ms) || 0), 0, 600000);
@@ -949,9 +954,30 @@ function startSession(kind, title, questions, opts = {}) {
   const qs = (questions || []).filter(Boolean);
   if (!qs.length) { toast(L('इस सेट में अभी कोई प्रश्न नहीं है।', 'There are no questions in this set yet.'), 'info'); return; }
   const seed = rid();
-  S = { kind, title: Array.isArray(title) ? title : [title, title], back: opts.back || 'quiz', timed: !!opts.timed, qs: qs.map(q => presentQ(q, seed)), i: 0, ans: {}, startedAt: Date.now(), shownAt: Date.now(), ai: {}, done: false, pts: 0, bonus: [] };
+  S = { kind, title: Array.isArray(title) ? title : [title, title], back: opts.back || 'learn', timed: !!opts.timed, ch: opts.ch || '', seed, qs: qs.map(q => presentQ(q, seed)), i: 0, ans: {}, startedAt: Date.now(), shownAt: Date.now(), ai: {}, done: false, pts: 0, bonus: [] };
+  if (S.ch) U.seen(S.ch);
+  saveSession();
   closeSheet();
   go('play');
+}
+// The open practice session survives a reload ("Continue learning" on Home) for a day.
+function saveSession() {
+  if (!S || S.done || S.kind === 'single') { LS.del('sess'); return; }
+  LS.set('sess', { kind: S.kind, title: S.title, back: S.back, timed: S.timed, ch: S.ch, seed: S.seed, ids: S.qs.map(q => q.id), i: S.i, ans: S.ans, pts: S.pts, bonus: S.bonus, startedAt: S.startedAt, at: Date.now() });
+}
+function savedSession() {
+  const x = LS.get('sess', null);
+  if (!x || !Array.isArray(x.ids) || !x.ids.length || Date.now() - (x.at || 0) > 864e5) return null;
+  return x;
+}
+function resumeSession() {
+  const x = savedSession(), m = M();
+  if (!x) return false;
+  const qs = x.ids.map(id => m.byId.get(id)).filter(Boolean);
+  if (!qs.length) { LS.del('sess'); return false; }
+  S = { kind: x.kind, title: x.title, back: x.back || 'learn', timed: !!x.timed, ch: x.ch || '', seed: x.seed, qs: qs.map(q => presentQ(q, x.seed)), i: clamp(x.i || 0, 0, qs.length - 1), ans: obj(x.ans, {}), startedAt: x.startedAt || Date.now(), shownAt: Date.now(), ai: {}, done: false, pts: x.pts || 0, bonus: Array.isArray(x.bonus) ? x.bonus : [] };
+  go('play');
+  return true;
 }
 const sTitle = () => (S ? L(S.title[0], S.title[1]) : '');
 function dailyQuestions() {
@@ -975,10 +1001,12 @@ function answer(sel) {
   const q = S.qs[S.i];
   if (!q || S.ans[q.id]) return;
   const ok = sel === q.a;
-  const earned = U.record(q, ok, { timed: S.timed });
-  S.ans[q.id] = { sel, ok, ms: Date.now() - S.shownAt, pts: earned };
+  const ms = Date.now() - S.shownAt;
+  const earned = U.record(q, ok, { timed: S.timed, ms, mode: S.kind === 'revision' ? 'r' : 'p' });
+  S.ans[q.id] = { sel, ok, ms, pts: earned };
   S.pts += earned;
   S.bonus.push(...(U.lastBonus || []));
+  saveSession();
   render();
   const o = qO(q);
   announce(sel === -1 ? L('समय समाप्त', 'Time is up') : ok ? L('सही उत्तर', 'Correct') : L(`गलत उत्तर। सही उत्तर है ${o[q.a]}`, `Wrong. The correct answer is ${o[q.a]}`));
@@ -987,12 +1015,18 @@ function answer(sel) {
 }
 function nextQ() {
   if (!S) return;
-  if (S.i < S.qs.length - 1) { S.i++; S.shownAt = Date.now(); render(); window.scrollTo(0, 0); }
+  if (S.i < S.qs.length - 1) { S.i++; S.shownAt = Date.now(); saveSession(); render(); window.scrollTo(0, 0); }
   else finishSession();
 }
 function finishSession() {
   if (!S) return;
   S.done = true; S.endedAt = Date.now();
+  LS.del('sess');
+  if (S.kind === 'today5') { U.s.t5[todayISO()] = S.qs.filter(q => S.ans[q.id] && S.ans[q.id].ok).length; U.touch(); }
+  if (S.kind === 'assess') {
+    const ok = S.qs.filter(q => S.ans[q.id] && S.ans[q.id].ok).length;
+    U.s.level = pct(ok, S.qs.length); U.s.onb = true; U.touch();
+  }
   if (S.kind === 'daily') {
     const ok = S.qs.filter(q => S.ans[q.id] && S.ans[q.id].ok).length;
     U.s.daily[todayISO()] = { score: ok, total: S.qs.length };
@@ -1009,7 +1043,12 @@ function finishSession() {
 let E = (() => { const e = LS.get('exam', null); return e && Array.isArray(e.qs) && e.st && !e.submitted ? e : null; })();
 let lastExam = LS.get('lastExam', null);
 const saveExam = () => { if (E) LS.set('exam', E); };
-const examTitle = ex => { const mk = MOCKS.find(m => m.id === (ex && ex.id)); return mk ? mockTitle(mk) : (ex && ex.title) || ''; };
+const examTitle = ex => {
+  if (ex && Array.isArray(ex.title)) return L(ex.title[0], ex.title[1]);
+  const mk = MOCKS.find(m => m.id === (ex && ex.id)); return mk ? mockTitle(mk) : (ex && ex.title) || '';
+};
+// Time spent on the current exam question is added when the learner moves away from it.
+function examClock() { if (!E) return; const id = E.qs[E.i], now = Date.now(); E.tm = E.tm || {}; E.tm[id] = (E.tm[id] || 0) + Math.max(0, now - (E.shownAt || now)); E.shownAt = now; }
 function mockQuestionIds(mk) {
   const m = M(), ids = [];
   for (const [s, n] of Object.entries(mk.mix)) {
@@ -1027,13 +1066,24 @@ function startExam(id) {
   const ids = mockQuestionIds(mk);
   if (ids.length < 5) { toast(L('इस परीक्षा के लिए पर्याप्त प्रश्न नहीं हैं।', 'There are not enough questions for this test.'), 'err'); return; }
   const now = Date.now();
-  E = { id: mk.id, pos: mk.pos, neg: mk.neg, qs: ids, i: 0, st: { [ids[0]]: { v: true } }, startedAt: now, endsAt: now + mk.mins * 60000, seed: 'exam:' + now, submitted: false };
+  E = { id: mk.id, pos: mk.pos, neg: mk.neg, qs: ids, i: 0, st: { [ids[0]]: { v: true } }, startedAt: now, shownAt: now, tm: {}, endsAt: now + mk.mins * 60000, seed: 'exam:' + now, submitted: false };
+  saveExam();
+  closeSheet();
+  go('exam');
+}
+// Exam mode on any question set: cfg = {title:[hi,en], ids, mins, pos, neg, kind, back, meta}
+function startExamWith(cfg) {
+  const ids = (cfg.ids || []).filter(id => M().byId.has(id));
+  if (ids.length < 3) { toast(L('इस परीक्षा के लिए पर्याप्त प्रश्न नहीं हैं।', 'There are not enough questions for this test.'), 'err'); return; }
+  const now = Date.now();
+  E = { id: cfg.id || 'custom', kind: cfg.kind || 'custom', title: cfg.title, pos: Number(cfg.pos) || 1, neg: Math.max(0, Number(cfg.neg) || 0), qs: ids, i: 0, st: { [ids[0]]: { v: true } }, startedAt: now, shownAt: now, tm: {}, endsAt: now + Math.max(1, Number(cfg.mins) || 10) * 60000, seed: cfg.seed || 'exam:' + now, back: cfg.back || 'compete', meta: cfg.meta || null, submitted: false };
   saveExam();
   closeSheet();
   go('exam');
 }
 function examMove(i) {
   if (!E) return;
+  examClock();
   E.i = clamp(i, 0, E.qs.length - 1);
   const id = E.qs[E.i];
   E.st[id] = { ...(E.st[id] || {}), v: true };
@@ -1062,12 +1112,17 @@ function examResult(ex) {
 }
 function submitExam(auto = false) {
   if (!E || E.submitted) return;
+  examClock();
   E.submitted = true;
   E.submittedAt = Math.min(Date.now(), E.endsAt);
   const R = examResult(E);
   let pts = 0;
-  for (const id of E.qs) { const s = E.st[id]; if (s && s.sel != null) { const q = examQ(id); if (q) pts += U.record(q, s.sel === q.a); } }
-  const bonus = U.once('mock:' + E.id) ? U.award('mock', Math.max(0, Math.round(R.score)) * PTS.mockX) : 0;
+  for (const id of E.qs) { const s = E.st[id]; if (s && s.sel != null) { const q = examQ(id); if (q) pts += U.record(q, s.sel === q.a, { ms: (E.tm || {})[id] || 0, mode: 'e' }); } }
+  let bonus = 0;
+  if (E.kind === 'wchal') {
+    const wk = (E.meta && E.meta.wk) || weekKey(todayISO());
+    if (!U.s.wc[wk]) { U.s.wc[wk] = { score: R.score, max: R.max, sec: R.timeSec, at: Date.now() }; bonus = U.award('wchal', PTS.wchal); R.firstTry = true; }
+  } else if (E.kind !== 'friend' && U.once('mock:' + E.id)) bonus = U.award('mock', Math.max(0, Math.round(R.score)) * PTS.mockX);
   R.pts = pts + bonus; R.bonus = bonus;
   U.s.mocks.unshift({ id: E.id, title: E.title || '', date: todayISO(), score: R.score, max: R.max, c: R.c, w: R.w, u: R.u, timeSec: R.timeSec });
   U.s.mocks = U.s.mocks.slice(0, 30);
@@ -1090,8 +1145,18 @@ function appbar(title, { back = '', right = '' } = {}) {
 function adminBar(title, back = 'admin') {
   return appbar(title, { back, right: `<a class="iconbtn" href="#home" aria-label="${L('ऐप पर लौटें', 'Back to the app')}" title="${L('ऐप पर लौटें', 'Back to the app')}">${ic('home')}</a>` });
 }
-const NAV = [['home', 'होम', 'Home', 'home'], ['quiz', 'क्विज', 'Quiz', 'book-open'], ['leaders', 'लीडरबोर्ड', 'Leaders', 'trophy'], ['bookmarks', 'बुकमार्क', 'Saved', 'bookmark'], ['profile', 'प्रोफ़ाइल', 'Profile', 'user']];
-const bottomNav = active => `<nav class="bnav" aria-label="${L('मुख्य मेनू', 'Main menu')}"><div class="bnav-in">${NAV.map(([r, hi, en, i]) => `<a href="#${r}"${r === active ? ' aria-current="page"' : ''}>${ic(i)}<span>${L(hi, en)}</span></a>`).join('')}</div></nav>`;
+// Four sections: Home · Learn · Compete · Progress. Profile, settings and notifications live in the top bar.
+const NAV = [['home', 'होम', 'Home', 'home'], ['learn', 'सीखें', 'Learn', 'book-open'], ['compete', 'मुक़ाबला', 'Compete', 'trophy'], ['progress', 'प्रगति', 'Progress', 'chart']];
+const NAV_OF = { quiz: 'learn', subject: 'learn', chapter: 'learn', ca: 'learn', news: 'learn', today: 'learn', revise: 'learn', cards: 'learn', bookmarks: 'learn', 'ca-notes': 'learn', mock: 'compete', leaders: 'compete', builder: 'compete', challenge: 'compete', profile: 'progress' };
+const bottomNav = active => { active = NAV_OF[active] || active; return `<nav class="bnav" aria-label="${L('मुख्य मेनू', 'Main menu')}"><div class="bnav-in">${NAV.map(([r, hi, en, i]) => `<a href="#${r}"${r === active ? ' aria-current="page"' : ''}>${ic(i)}<span>${L(hi, en)}</span></a>`).join('')}</div></nav>`; };
+// Top bar for the four main sections: title, notifications and the profile/settings avatar.
+function topbar(title) {
+  const n = notifications().length, name = U.s.name.trim();
+  return `<header class="appbar topbar"><div class="appbar-in gutter"><h1>${title}</h1>
+    <button class="iconbtn" data-act="notifs" aria-label="${L('सूचनाएँ', 'Notifications')}${n ? ` (${n})` : ''}">${ic('bell')}${n ? `<span class="dot">${n}</span>` : ''}</button>
+    <a class="iconbtn" href="#profile" aria-label="${L('प्रोफ़ाइल और सेटिंग्स', 'Profile and settings')}"><span class="avatar">${name ? esc(initial(name)) : ic('user')}</span></a>
+  </div></header>`;
+}
 function ring(p, size, stroke, color = 'var(--ring)') {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r, off = c * (1 - clamp(p, 0, 1)), h = size / 2;
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true"><circle cx="${h}" cy="${h}" r="${r}" fill="none" style="stroke:var(--ring-track)" stroke-width="${stroke}"/><circle cx="${h}" cy="${h}" r="${r}" fill="none" style="stroke:${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" transform="rotate(-90 ${h} ${h})"/></svg>`;
@@ -1110,7 +1175,8 @@ function qPreview(q) {
   ${en ? `<div class="qprev-en"><span class="tag">EN</span><b>${esc(en.q)}</b><ol type="A">${opts(en.o)}</ol>${en.e ? `<span class="small muted">${esc(en.e)}</span>` : ''}</div>` : `<span class="small muted">${L('अंग्रेज़ी संस्करण नहीं है — अंग्रेज़ी में हिंदी दिखेगी।', 'No English version: English users will see the Hindi text.')}</span>`}</div>`;
 }
 function dataErrorNote() {
-  return `<div class="note note-warn">${ic('alert')}<div>${L('<b>सामग्री लोड नहीं हुई।</b> ऐप को किसी वेब सर्वर से खोलें (जैसे <code>npx serve</code>)। सीधे फ़ाइल खोलने पर ब्राउज़र डेटा फ़ाइलें नहीं पढ़ पाता।', '<b>Content did not load.</b> Open the app from a web server (for example <code>npx serve</code>). Browsers cannot read the data files when the page is opened directly from disk.')}</div></div>`;
+  const off = navigator.onLine === false;
+  return `<div class="note note-warn">${ic(off ? 'wifi-off' : 'alert')}<div class="retry-row"><span>${off ? L('<b>इंटरनेट नहीं है।</b> सामग्री लोड नहीं हुई — कनेक्शन आने पर फिर कोशिश करें।', '<b>No internet.</b> Content did not load — try again when you are connected.') : L('<b>सामग्री लोड नहीं हुई।</b> नेटवर्क जाँचें और फिर कोशिश करें। (फ़ाइल सीधे खोलने पर ब्राउज़र डेटा नहीं पढ़ पाता — ऐप को वेब सर्वर से खोलें।)', '<b>Content did not load.</b> Check the network and try again. (Browsers cannot read the data when the page is opened directly from disk — open it from a web server.)')}</span><button class="btn btn-sm btn-outline" data-act="retry-load">${ic('rotate')} ${L('फिर कोशिश करें', 'Try again')}</button></div></div>`;
 }
 
 // Bottom sheet (modal) and toast.
@@ -1168,109 +1234,29 @@ function notifications() {
   if (rank && rank <= 10) out.push({ icon: 'trophy', text: L(`आप इस सप्ताह लीडरबोर्ड पर #${rank} हैं`, `You are #${rank} on this week's leaderboard`), to: 'leaders' });
   return out;
 }
-function topicChips() {
-  const m = M(), out = [];
-  for (const d of (m.daysByMd[todayISO().slice(5)] || [])) out.push(`<a class="chip" href="#today">${ic('calendar')}${esc(dT(d))}</a>`);
-  for (const c of uniq(m.news.slice(0, 8).map(n => n.cat)).slice(0, 4)) out.push(`<button class="chip" data-act="ca-cat" data-cat="${esc(c)}">${esc(catLabel(c))}</button>`);
-  return out.join('') || `<span class="small muted">${L('आज के विषय जल्द आएँगे।', 'Today\'s topics are coming soon.')}</span>`;
-}
 function newsCard(n) {
   const c = catOf(n.cat);
   return `<button class="news" data-act="open-news" data-id="${esc(n.id)}" style="--c1:${c.c1};--c2:${c.c2}"><span class="thumb">${ic(c.icon)}</span><span class="news-main"><span><span class="badge">${esc(catLabel(n.cat))}</span></span><span class="nt">${esc(nT(n))}</span><span class="ns">${esc(nS(n))}</span><span class="more">${L('विस्तार से पढ़ें', 'Read more')} ${ic('arrow-right')}</span></span></button>`;
 }
 const langBtn = (cls = 'iconbtn') => `<button class="${cls} lang-btn" data-act="lang-toggle" aria-label="${L('Switch to English', 'हिंदी में बदलें')}" title="${L('Switch to English', 'हिंदी में बदलें')}"><span>${L('EN', 'हिं')}</span></button>`;
 const onb = { name: '', exam: '', goal: 10 };
-function onboardCard() {
-  return `<section class="card onb" aria-label="${L('प्रोफ़ाइल बनाएँ', 'Create your profile')}"><form data-form="onb" style="display:flex;flex-direction:column;gap:12px">
-  <h2 style="font-size:1.1rem;font-weight:800">${L('अपनी तैयारी को निजी बनाएँ', 'Make your preparation personal')}</h2>
-  <div class="field"><span class="lbl">${L('भाषा', 'Language')}</span><div class="chips">${[['hi', 'हिंदी'], ['en', 'English']].map(([v, l]) => `<button type="button" class="chip" data-act="set-lang" data-v="${v}" aria-pressed="${LANG === v}">${l}</button>`).join('')}</div></div>
-  <div class="field"><label for="onb-name">${L('आपका नाम', 'Your name')}</label><input class="input" id="onb-name" data-bind="onb.name" value="${esc(onb.name)}" maxlength="40" placeholder="${L('जैसे: राहुल', 'e.g. Rahul')}" autocomplete="given-name"></div>
-  <div class="field"><span class="lbl">${L('लक्ष्य परीक्षा', 'Target exam')}</span><div class="chips wrap">${EXAMS.map(([v, en]) => `<button type="button" class="chip" data-act="onb-exam" data-v="${esc(v)}" aria-pressed="${onb.exam === v}">${esc(L(v, en))}</button>`).join('')}</div></div>
-  <div class="field"><span class="lbl">${L('रोज़ का लक्ष्य', 'Daily goal')}</span><div class="chips">${[10, 20, 30].map(n => `<button type="button" class="chip" data-act="onb-goal" data-v="${n}" aria-pressed="${onb.goal === n}">${n} ${L('प्रश्न', 'questions')}</button>`).join('')}</div></div>
-  <div class="btnrow"><button class="btn btn-cta" type="submit">${ic('check')} ${L('सहेजें', 'Save')}</button><button class="btn btn-grey" type="button" data-act="onb-skip">${L('बाद में', 'Later')}</button></div>
-  </form></section>`;
-}
-function rewardCard() {
-  const wk = weekKey(todayISO()), wp = U.ptsWeek(wk), rank = LB.myRank('week');
-  const prize = L(LB.settings.weekPrize, LB.settings.weekPrizeEn);
-  return `<a class="reward" href="#leaders">
-    <span class="reward-ic">${ic('trophy')}</span>
-    <span class="row-main"><span class="row-title">${L('इस सप्ताह', 'This week')}: ${fmtNum(wp)} ${L('पॉइंट्स', 'points')}${rank ? ` · ${L('रैंक', 'rank')} #${rank}` : ''}</span>
-    <span class="row-sub">${prize ? `${L('इनाम', 'Prize')}: ${esc(prize)}` : L(`कुल ${fmtNum(U.s.pts.total)} पॉइंट्स · हर सही उत्तर पर +${PTS.correct}`, `${fmtNum(U.s.pts.total)} points in total · +${PTS.correct} for every correct answer`)}</span></span>
-    ${ic('chev-right', 'chev')}</a>`;
-}
-function vHome() {
-  const m = M(), t = todayISO();
-  const name = U.s.name.trim();
-  const cnt = U.todayCount(), goal = U.s.goal || 10, st = U.streak();
-  const daily = U.s.daily[t];
-  const due = U.due().length;
-  const notif = notifications().length;
-  const latest = m.news.slice(0, 2);
-  return `
-<header class="hero"><div class="gutter">
-  <div class="brandrow">
-    <div class="logo">${capLogo()}<span>MY <span class="q">QUIZ</span></span></div>
-    <div class="hero-actions">
-      ${langBtn()}
-      <button class="iconbtn" data-act="notifs" aria-label="${L('सूचनाएँ', 'Notifications')}${notif ? ` (${notif})` : ''}">${ic('bell')}${notif ? `<span class="dot">${notif}</span>` : ''}</button>
-      <a class="avatar" href="#profile" aria-label="${L('प्रोफ़ाइल', 'Profile')}">${name ? esc(initial(name)) : ic('user')}</a>
-    </div>
-  </div>
-  <p class="greet">${L('नमस्कार', 'Hello')}${name ? `, ${esc(name)}` : ''}! ${L('आपका स्वागत है।', 'Welcome.')}</p>
-  <p class="greet-sub">${L('आज कुछ नया सीखिए और अपना ज्ञान बढ़ाइए।', 'Learn something new today and grow your knowledge.')}</p>
-</div></header>
-<main class="home-body gutter">
-  ${C.baseState === 'error' ? dataErrorNote() : ''}
-  <section class="daily" aria-label="${L('आज की तैयारी', 'Today\'s preparation')}">
-    <div class="ringbox" aria-label="${L(`आज ${goal} में से ${cnt} प्रश्न`, `${cnt} of ${goal} questions today`)}">${ring(cnt / goal, 68, 7)}<b class="tnum">${Math.min(cnt, 999)}<small>/ ${goal} ${L('प्रश्न', 'Qs')}</small></b></div>
-    <div><h2>${L('आज की तैयारी कैसी चल रही है?', 'How is today\'s preparation going?')}</h2><p>${daily ? L(`दैनिक क्विज पूरा — ${daily.score}/${daily.total} सही। बढ़िया!`, `Daily quiz done: ${daily.score}/${daily.total} correct. Great!`) : L('आज का दैनिक क्विज पूरा करें।', 'Complete today\'s daily quiz.')}</p></div>
-    <div class="daily-foot"><span class="streak" title="${L(`रोज़ कम से कम ${STREAK_MIN} प्रश्न हल करें`, `Answer at least ${STREAK_MIN} questions a day`)}">${ic('flame')} ${L(`${st} दिन की स्ट्रीक`, `${st}-day streak`)}</span>
-      <button class="btn btn-cta btn-sm" data-act="start-daily" ${C.baseState !== 'ok' ? 'disabled' : ''}>${daily ? L('फिर से खेलें', 'Play again') : L('शुरू करें', 'Start')} ${ic('arrow-right')}</button></div>
-  </section>
-  ${rewardCard()}
-  <section class="tiles" aria-label="${L('मुख्य विभाग', 'Main sections')}">
-    <a class="tile t-blue" href="#quiz">${ic('help')}<b>${L('क्विज', 'Quiz')}</b><span>${L('विषयवार सामान्य ज्ञान', 'Subject-wise GK')}</span></a>
-    <a class="tile t-green" href="#today">${ic('calendar')}<b>${L('आज का दिन', 'Today in History')}</b><span>${L('महत्वपूर्ण दिवस', 'Important days')}</span></a>
-    <a class="tile t-orange" href="#ca">${ic('newspaper')}<b class="latin">Current Affairs</b><span>${L('दैनिक समसामयिकी', 'Daily news for exams')}</span></a>
-    <a class="tile t-purple" href="#mock">${ic('clipboard')}<b>${L('अभ्यास परीक्षा', 'Mock Tests')}</b><span>${L('मॉक टेस्ट', 'Exam practice')}</span></a>
-  </section>
-  ${!name && !LS.get('onb-skip', false) ? onboardCard() : ''}
-  ${due ? `<button class="revise" data-act="start-revision"><span class="ico">${ic('rotate')}</span><span class="row-main"><b>${L(`${due} प्रश्न दोहराव के लिए तैयार`, `${due} questions ready for revision`)}</b><span class="row-sub">${L('पहले गलत हुए प्रश्न फिर से हल करें — याद पक्की होगी', 'Retry questions you got wrong to make them stick')}</span></span>${ic('chev-right', 'chev')}</button>` : ''}
-  <section aria-label="${L('आज के महत्वपूर्ण विषय', 'Today\'s important topics')}"><h2 class="sec-title">${ic('star', 'star')} ${L('आज के महत्वपूर्ण विषय', 'Today\'s important topics')}</h2><div class="chips" style="margin-top:10px">${C.baseState === 'loading' ? '<div class="skeleton" style="height:34px;width:100%"></div>' : topicChips()}</div></section>
-  ${latest.length ? `<section style="display:flex;flex-direction:column;gap:10px"><div class="sec-head"><h2 class="sec-title">${ic('newspaper')} ${L('ताज़ा करेंट अफेयर्स', 'Latest current affairs')}</h2><a class="link" href="#ca">${L('सभी देखें', 'See all')} ${ic('chev-right')}</a></div>${latest.map(newsCard).join('')}</section>` : ''}
-  ${P.isAdmin ? `<a class="act" href="#admin"><span class="ai">${ic('settings')}</span><span>${L('एडमिन पैनल', 'Admin panel')}<span class="row-sub">${LOCAL() ? L('डेमो: समाचार, AI प्रश्न, समीक्षा और प्रकाशन', 'Demo: news, AI questions, review and publishing') : L('समाचार, AI प्रश्न, समीक्षा, प्रकाशन और पुरस्कार', 'News, AI questions, review, publishing and prizes')}</span></span>${ic('chev-right', 'chev')}</a>` : ''}
-</main>
-${bottomNav('home')}`;
-}
-
-function vQuiz() {
-  const s = U.s.set;
-  const rows = SUBJECTS.map(sj => {
-    const st = U.subjStats(sj.k);
-    return `<button class="row" data-act="start-subject" data-s="${sj.k}" style="--c:${sj.c}"><span class="row-ic">${ic(sj.icon)}</span><span class="row-main"><span class="row-title">${subjName(sj.k)}</span><span class="row-sub">${st.seen ? L(`${st.seen}/${st.total} हल किए · सटीकता ${st.acc}%`, `${st.seen}/${st.total} done · ${st.acc}% accuracy`) : L('अभी शुरू नहीं किया', 'Not started yet')}</span><span class="minibar"><i style="width:${pct(st.seen, st.total)}%"></i></span></span><span class="count tnum">${st.total} ${L('प्रश्न', 'Qs')}</span>${ic('chev-right', 'chev')}</button>`;
-  }).join('');
-  return `${appbar(L('क्विज – विषय चुनें', 'Quiz: choose a subject'), { back: 'home', right: `<button class="iconbtn" data-act="search-open" aria-label="${L('प्रश्न खोजें', 'Search questions')}">${ic('search')}</button>` })}
-<main class="page gutter">
-  <div class="seg" role="group" aria-label="${L('क्विज मोड', 'Quiz mode')}">
-    <button data-act="set-mode" data-v="practice" aria-pressed="${s.mode !== 'timed'}">${L('अभ्यास मोड', 'Practice')}<small>${L('तुरंत उत्तर और व्याख्या', 'Instant answer and explanation')}</small></button>
-    <button data-act="set-mode" data-v="timed" aria-pressed="${s.mode === 'timed'}">${L('समयबद्ध', 'Timed')}<small>${L(`${TIMED_SECONDS} सेकंड प्रति प्रश्न · +${PTS.timed} बोनस`, `${TIMED_SECONDS} s per question · +${PTS.timed} bonus`)}</small></button>
-  </div>
-  <div class="sec-head"><span class="small muted">${L('एक बार में प्रश्न', 'Questions per round')}</span><div class="chips">${[10, 20, 0].map(n => `<button class="chip" data-act="set-count" data-v="${n}" aria-pressed="${(s.count ?? 10) === n}">${n || L('सभी', 'All')}</button>`).join('')}</div></div>
-  ${C.baseState === 'error' ? dataErrorNote() : ''}
-  <div class="list">${C.baseState === 'loading' ? skeletonRows(6) : rows}</div>
-  <div class="tip">${ic('bulb')}<p>${L('अपनी पसंद का विषय चुनें और ज्ञान की परीक्षा दें। हर सही उत्तर पर पॉइंट्स मिलते हैं।', 'Pick a subject and test your knowledge. Every correct answer earns points.')}</p></div>
-  <div class="grid2"><button class="btn btn-outline" data-act="start-bookmarked">${ic('bookmark')} ${L('बुकमार्क प्रश्न', 'Saved questions')}</button><button class="btn btn-outline" data-act="start-revision">${ic('rotate')} ${L('दोहराव', 'Revision')}</button></div>
-</main>
-${bottomNav('quiz')}`;
-}
-
 function explainBox(q, a) {
-  const head = a.sel === -1 ? `<span class="ans-bad">${L('समय समाप्त!', 'Time is up!')}</span>` : a.ok ? `<span class="ans-ok">${L('सही उत्तर!', 'Correct!')}</span>` : `<span class="ans-bad">${L('गलत उत्तर।', 'Wrong answer.')}</span>`;
+  const o = qO(q), why = qWhy(q), ctx = qCtx(q), ref = qRef(q), n = q.n && M().newsById.get(q.n);
+  const head = a.sel === -1 ? `<span class="ans-bad">${ic('clock')} ${L('समय समाप्त!', 'Time is up!')}</span>` : a.ok ? `<span class="ans-ok">${ic('check')} ${L('सही उत्तर!', 'Correct!')}</span>` : `<span class="ans-bad">${ic('x')} ${L('गलत उत्तर', 'Wrong answer')}</span>`;
   const st = S.ai[q.id];
-  const aiBtn = AI.available() && !st ? `<button class="link" data-act="ai-explain" data-id="${esc(q.id)}">${ic('sparkles')} ${L('AI से और समझें', 'Explain more with AI')}</button>` : '';
   const earned = a.pts ? `<span class="pts pts-pop">+${a.pts} ${L('पॉइंट्स', 'points')}</span>` : '';
-  return `<div class="explain">${ic('bulb', 'bulb')}<div style="min-width:0"><h3>${head} ${L('व्याख्या:', 'Explanation:')} ${earned}</h3><p>${esc(qE(q) || L('व्याख्या जल्द जोड़ी जाएगी।', 'An explanation will be added soon.'))}</p>${st ? `<div class="ai-box" id="ai-${esc(q.id)}">${esc(st.text || L('सोच रहा है…', 'Thinking…'))}</div>${st.err ? `<p class="small" style="color:var(--bad);margin-top:6px">${esc(st.err)}</p>` : ''}` : ''}${aiBtn ? `<div style="margin-top:8px">${aiBtn}</div>` : ''}</div></div>`;
+  const notes = o.map((x, i) => (i !== q.a && why[i] ? `<li><span class="key" aria-hidden="true">${LETTERS[i]}</span><span><b>${esc(x)}:</b> ${esc(why[i])}</span></li>` : '')).join('');
+  const related = (M().byCh[chOf(q)] || []).length > 1;
+  return `<div class="explain" role="region" aria-label="${L('व्याख्या', 'Explanation')}">
+    <div class="ex-head"><h3>${head}</h3>${earned}</div>
+    <div class="ex-sec" style="border-top:0;padding-top:0"><h4>${ic('check')} ${L('सही उत्तर', 'Correct answer')}: ${LETTERS[q.a]}. ${esc(o[q.a])}</h4><p>${esc(qE(q) || L('व्याख्या जल्द जोड़ी जाएगी।', 'An explanation will be added soon.'))}</p></div>
+    ${notes ? `<div class="ex-sec"><h4>${ic('x')} ${L('बाकी विकल्प क्यों गलत हैं', 'Why the other options are wrong')}</h4><ul class="why-list">${notes}</ul></div>` : ''}
+    ${ctx ? `<div class="ex-sec"><h4>${ic('bulb')} ${L('पृष्ठभूमि और जुड़े तथ्य', 'Background and related facts')}</h4><p>${esc(ctx)}</p></div>` : ''}
+    <div class="ex-sec"><h4>${ic('graduation')} ${L('परीक्षा में उपयोगी', 'Exam relevance')}</h4><p class="excats">${examsOf(q).map(e => `<span class="tag">${esc(examLabel(e))}</span>`).join('')} ${diffBars(q.d)}</p></div>
+    ${ref || n ? `<p class="ex-ref">${ic('book')} ${L('स्रोत', 'Source')}: ${n ? `<button class="link" data-act="open-news" data-id="${esc(n.id)}">${esc(nT(n))}</button>${nSrc(n) ? ' — ' + esc(nSrc(n)) : ''}` : esc(ref)}</p>` : ''}
+    ${st ? `<div class="ai-box" id="ai-${esc(q.id)}">${esc(st.text || L('सोच रहा है…', 'Thinking…'))}</div>${st.err ? `<p class="small" style="color:var(--bad);margin:0">${esc(st.err)}</p>` : ''}` : ''}
+    <div class="btnrow">${related ? `<button class="btn btn-sm btn-outline" data-act="practice-related" data-id="${esc(q.id)}">${ic('layers')} ${L('जुड़े प्रश्न', 'Related practice')}</button>` : ''}${AI.available() && !st ? `<button class="btn btn-sm btn-outline" data-act="ai-explain" data-id="${esc(q.id)}">${ic('sparkles')} ${L('AI से और समझें', 'Explain more with AI')}</button>` : ''}${AI.available() ? `<button class="btn btn-sm btn-outline" data-act="tutor" data-id="${esc(q.id)}">${ic('message')} ${L('AI ट्यूटर से पूछें', 'Ask the AI tutor')}</button>` : ''}</div>
+  </div>`;
 }
 function vPlay() {
   if (!S || !S.qs.length) return redirect('quiz');
@@ -1290,7 +1276,7 @@ function vPlay() {
 <main class="page gutter">
   <div class="qtop">
     <div class="progress" role="progressbar" aria-label="${L('प्रगति', 'Progress')}" aria-valuemin="0" aria-valuemax="${n}" aria-valuenow="${S.i + 1}"><i style="width:${((S.i + (a ? 1 : 0)) / n) * 100}%"></i></div>
-    <div class="qmeta"><span class="tag">${esc(subjName(q.s))}${qTopic(q) ? ' · ' + esc(qTopic(q)) : ''}</span><span class="qmeta-r">${S.pts ? ptsChip(S.pts) : ''}${timer}</span></div>
+    <div class="qmeta"><span class="tag">${esc(subjName(q.s))} · ${esc(chName(chOf(q)))}</span>${diffBars(q.d)}<span class="qmeta-r">${S.pts ? ptsChip(S.pts) : ''}${timer}</span></div>
   </div>
   <h2 class="qtext">${esc(qT(q))}</h2>
   <div class="opts" role="group" aria-label="${L('विकल्प', 'Options')}">${opts}</div>
@@ -1338,48 +1324,14 @@ function vResult() {
     <div class="stat s-ok"><b>${c}</b><span>${L('सही', 'Correct')}</span></div><div class="stat s-bad"><b>${w}</b><span>${L('गलत', 'Wrong')}</span></div><div class="stat"><b>${sk}</b><span>${L('छोड़े', 'Skipped')}</span></div>
     <div class="stat"><b>${pct(c, n)}%</b><span>${L('सटीकता', 'Accuracy')}</span></div><div class="stat"><b class="tnum">${fmtSecs(secs)}</b><span>${L('समय', 'Time')}</span></div><div class="stat"><b>${U.streak()}</b><span>${L('दिन की स्ट्रीक', 'Day streak')}</span></div>
   </div>
+  ${S.kind === 'assess' ? `<section class="card next"><span class="k">${L('आपका स्तर', 'Your level')}</span><h3>${levelName(U.s.level)} · ${U.s.level}%</h3><p>${U.s.level >= 80 ? L('बहुत बढ़िया! उन्नत अध्याय और मॉक टेस्ट से शुरुआत करें।', 'Excellent! Start with advanced chapters and mock tests.') : U.s.level >= 40 ? L('अच्छी शुरुआत। रोज़ की चुनौती और अध्याय-अभ्यास से आगे बढ़ें।', 'A good start. Build up with the daily challenge and chapter practice.') : L('कोई बात नहीं — आसान अध्यायों से शुरू करें, हर व्याख्या ध्यान से पढ़ें।', 'No problem — start with beginner chapters and read every explanation.')}</p><button class="btn btn-cta btn-block" data-act="nav" data-to="home">${L('मेरा डैशबोर्ड', 'My dashboard')} ${ic('arrow-right')}</button></section>` : ''}
   <div class="btnrow">${w + sk ? `<button class="btn btn-cta" data-act="retry-wrong">${ic('rotate')} ${L('गलत/छोड़े प्रश्न दोबारा', 'Retry wrong / skipped')}</button>` : ''}<button class="btn btn-outline" data-act="share-result">${ic('share')} ${L('स्कोर शेयर करें', 'Share score')}</button></div>
   <section><h2 class="sec-title" style="margin-bottom:10px">${ic('list')} ${L('उत्तरों की समीक्षा', 'Answer review')}</h2><div class="list">${review}</div></section>
-  <div class="grid2"><a class="btn btn-grey" href="#quiz">${L('विषय सूची', 'Subjects')}</a><a class="btn btn-navy" href="#home">${L('होम', 'Home')}</a></div>
+  <div class="grid2"><a class="btn btn-grey" href="#learn">${L('सीखें', 'Learn')}</a><a class="btn btn-navy" href="#home">${L('होम', 'Home')}</a></div>
 </main>`;
 }
 
 let caCat = '';
-function vCA() {
-  const m = M(), t = todayISO();
-  const list = caCat ? m.news.filter(n => n.cat === caCat) : m.news;
-  const groups = {};
-  for (const n of list) (groups[n.date] = groups[n.date] || []).push(n);
-  const caQs = (m.bySubj.ca || []).length;
-  const todayN = m.news.filter(n => n.date === t).length;
-  const latest = m.news[0] && m.news[0].date;
-  const feed = Object.keys(groups).sort().reverse().map(d => `<h3 class="dgroup">${fmtDate(d)} · ${weekday(d)}</h3>${groups[d].map(newsCard).join('')}`).join('');
-  return `${appbar(`${ic('newspaper')} Current Affairs`, { back: 'home', right: `<span class="pill pill-green">${L('दैनिक अपडेट', 'Daily update')}</span>` })}
-<main class="page gutter">
-  <div class="datebar">${ic('calendar')} <span class="tnum">${fmtDate(t)}</span></div>
-  <p class="small muted" style="margin:-10px 0 0;text-align:center">${todayN ? L(`आज की ${todayN} नई ख़बरें`, `${todayN} new items today`) : L('आज की ख़बरें अभी प्रकाशित नहीं हुईं', 'Today\'s news is not published yet') + (latest ? ` · ${L('नवीनतम', 'latest')}: ${fmtDate(latest, false)}` : '')}</p>
-  ${caQs ? `<button class="ca-cta" data-act="start-ca">${ic('zap')}<span class="row-main"><b>${L('करेंट अफेयर्स क्विज', 'Current affairs quiz')}</b><span>${L(`${Math.min(caQs, 10)} प्रश्न · नवीनतम ख़बरों से`, `${Math.min(caQs, 10)} questions from the latest news`)}</span></span>${ic('arrow-right')}</button>` : ''}
-  <div class="chips" role="group" aria-label="${L('श्रेणी चुनें', 'Choose a category')}"><button class="chip" data-act="ca-cat" data-cat="" aria-pressed="${!caCat}">${L('सभी', 'All')}</button>${uniq(m.news.map(n => n.cat)).map(c => `<button class="chip" data-act="ca-cat" data-cat="${esc(c)}" aria-pressed="${caCat === c}">${esc(catLabel(c))}</button>`).join('')}</div>
-  ${C.baseState === 'error' ? dataErrorNote() : ''}
-  ${C.baseState === 'loading' ? skeletonCards(3) : feed || emptyState('newspaper', L('इस श्रेणी में अभी कोई ख़बर नहीं', 'No news in this category yet'), '')}
-</main>
-${bottomNav('')}`;
-}
-function openNews(id) {
-  const m = M(), n = m.newsById.get(id);
-  if (!n) return;
-  const c = catOf(n.cat);
-  const qs = (m.bySubj.ca || []).filter(q => q.n === n.id);
-  const bm = U.isBm('n', n.id);
-  const src = n.source || {}, url = safeUrl(src.url), facts = nF(n);
-  openSheet(`${sheetHead(esc(nT(n)))}
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge" style="--c2:${c.c2}">${esc(catLabel(n.cat))}</span><span class="small muted">${fmtDate(n.date)} · ${weekday(n.date)}</span></div>
-  <p style="margin:0;font-size:1.05rem">${esc(nS(n))}</p>
-  ${facts.length ? `<div class="card" style="box-shadow:none;background:var(--surface-2)"><h3 class="sec-title" style="font-size:1rem;margin-bottom:10px">${ic('target')} ${L('परीक्षा के लिए मुख्य तथ्य', 'Key facts for exams')}</h3><ul class="facts">${facts.map(f => `<li>${ic('check')}<span>${esc(f)}</span></li>`).join('')}</ul></div>` : ''}
-  ${nSrc(n) ? `<p class="small muted" style="margin:0">${L('स्रोत', 'Source')}: ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(nSrc(n))} ${ic('external')}</a>` : esc(nSrc(n))}</p>` : ''}
-  <div class="btnrow">${qs.length ? `<button class="btn btn-cta" data-act="news-quiz" data-id="${esc(n.id)}">${ic('help')} ${L(`इस ख़बर से ${qs.length} प्रश्न`, `${qs.length} questions from this story`)}</button>` : ''}<button class="btn btn-outline" data-act="bm-n" data-id="${esc(n.id)}" aria-pressed="${bm}">${ic('bookmark', bm ? 'fill' : '')} ${bm ? L('सहेजा गया', 'Saved') : L('सहेजें', 'Save')}</button><button class="btn btn-outline" data-act="share-news" data-id="${esc(n.id)}">${ic('share')} ${L('शेयर', 'Share')}</button></div>`, { label: nT(n) });
-}
-
 let dayCursor = null; // ISO date shown on "आज का दिन" (null = today)
 let dayPick = 0;
 function upcomingDays(fromISO, n) {
@@ -1389,47 +1341,6 @@ function upcomingDays(fromISO, n) {
     for (const e of (m.daysByMd[d.slice(5)] || [])) { if (out.length < n) out.push({ ...e, iso: d }); }
   }
   return out;
-}
-function vToday() {
-  const m = M(), t = todayISO();
-  const iso = dayCursor || t, md = iso.slice(5);
-  const entries = m.daysByMd[md] || [];
-  const d = entries[clamp(dayPick, 0, Math.max(0, entries.length - 1))];
-  const isToday = iso === t;
-  const rel = m.all.filter(q => q.day === md).length;
-  const up = upcomingDays(iso, 6);
-  const dd = parseISO(iso);
-  let card;
-  if (C.baseState === 'loading') card = '<div class="skeleton" style="height:300px;border-radius:20px"></div>';
-  else if (!d) {
-    const nx = up[0];
-    card = `<div class="card">${emptyState('calendar', L('इस तारीख़ के लिए कोई प्रमुख दिवस दर्ज नहीं है', 'No important day is listed for this date'), nx ? `${L('अगला महत्वपूर्ण दिवस', 'Next important day')}: <b>${esc(dT(nx))}</b> (${fmtMD(nx.md)})` : '')}${nx ? `<button class="btn btn-navy btn-block" data-act="day-goto" data-iso="${nx.iso}">${L('देखें', 'View')}: ${esc(dT(nx))} ${ic('arrow-right')}</button>` : ''}</div>`;
-  } else {
-    const k = kindOf(d.k), facts = dF(d);
-    card = `${entries.length > 1 ? `<div class="chips" role="group" aria-label="${L('इस दिन के दिवस', 'Days on this date')}">${entries.map((e, i) => `<button class="chip" data-act="day-pick" data-i="${i}" aria-pressed="${e === d}">${esc(dT(e))}</button>`).join('')}</div>` : ''}
-    <article class="daycard">
-      <div class="day-top">
-        <div class="day-art"><span class="dn tnum">${dd.getDate()}</span><span class="dm">${MONTHS[LANG][dd.getMonth()]}</span>${ic(k.icon)}</div>
-        <div class="day-title"><span><span class="badge" style="--c2:${k.c}">${esc(kindLabel(d.k))}</span></span><h2>${esc(dT(d))}</h2><span class="small" style="color:var(--muted)">(${fmtMD(d.md)}${d.y ? ` · ${L(k.y, k.yEn)}: ${d.y}` : ''})</span></div>
-      </div>
-      <div class="day-sec">${ic('book-open')}<div><h3>${L('शुरुआत का इतिहास', 'History')}</h3><p>${esc(dH(d))}</p></div></div>
-      ${dO(d) ? `<div class="day-sec">${ic('target')}<div><h3>${L('उद्देश्य', 'Purpose')}</h3><p>${esc(dO(d))}</p></div></div>` : ''}
-      ${facts.length ? `<div class="day-sec">${ic('star')}<div><h3>${L('महत्वपूर्ण तथ्य', 'Key facts')}</h3><ul>${facts.map(f => `<li>${esc(f)}</li>`).join('')}</ul></div></div>` : ''}
-    </article>
-    ${rel ? `<button class="btn btn-navy btn-block" data-act="day-quiz" data-md="${md}">${L(`इस दिन से जुड़े ${rel} प्रश्न देखें`, `See ${rel} questions about this day`)} ${ic('arrow-right')}</button>` : ''}`;
-  }
-  return `${appbar(`${ic('calendar')} ${L('आज का दिन', 'Today in History')}`, { back: 'home', right: `<button class="iconbtn" data-act="day-calendar" aria-label="${L('कैलेंडर से तारीख़ चुनें', 'Pick a date from the calendar')}">${ic('list')}</button>` })}
-<main class="page gutter">
-  <div class="daynav">
-    <button class="iconbtn" data-act="day-step" data-v="-1" aria-label="${L('पिछला दिन', 'Previous day')}">${ic('chev-left')}</button>
-    <div class="when tnum">${isToday ? L('आज, ', 'Today, ') : ''}${fmtDate(iso, false)}<small>${WEEKDAYS[LANG][dd.getDay()]}${isToday ? '' : ` · <button class="link" data-act="day-today">${L('आज पर लौटें', 'Back to today')}</button>`}</small></div>
-    <button class="iconbtn" data-act="day-step" data-v="1" aria-label="${L('अगला दिन', 'Next day')}">${ic('chev-right')}</button>
-  </div>
-  ${C.baseState === 'error' ? dataErrorNote() : ''}
-  ${card}
-  ${up.length ? `<section class="card" style="display:flex;flex-direction:column;gap:12px"><h2 class="sec-title" style="font-size:1.05rem">${ic('calendar')} ${L('आने वाले महत्वपूर्ण दिवस', 'Coming up')}</h2>${up.map(e => { const dn = diffDays(t, e.iso); return `<button class="upc link" style="color:inherit;font-weight:600;text-align:left" data-act="day-goto" data-iso="${e.iso}"><span class="d"><b class="tnum">${parseISO(e.iso).getDate()}</b><span>${monthShort(parseISO(e.iso).getMonth())}</span></span><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(dT(e))}</span><span class="row-sub">${esc(kindLabel(e.k))} · ${dn === 1 ? L('कल', 'tomorrow') : dn > 0 ? L(`${dn} दिन बाद`, `in ${dn} days`) : fmtDate(e.iso, false)}</span></span></button>`; }).join('')}</section>` : ''}
-</main>
-${bottomNav('')}`;
 }
 function openDayCalendar(month) {
   const m = M();
@@ -1543,7 +1454,12 @@ function vExamResult() {
     const ok = s.sel === q.a;
     return `<div class="review-item"><b>${i + 1}. ${esc(qT(q))}</b><span class="ans">${L('सही उत्तर', 'Correct answer')}: <span class="ans-ok">${esc(o[q.a])}</span></span>${ok ? `<span class="ans ans-ok">+${ex.pos}</span>` : `<span class="ans">${L('आपका उत्तर', 'Your answer')}: <span class="ans-bad">${esc(yours)}</span>${s.sel == null ? '' : ` <span class="ans-bad">(−${ex.neg})</span>`}</span>`}<span class="small muted">${esc(qE(q) || '')}</span></div>`;
   }).join('');
-  return `${appbar(L('परीक्षा परिणाम', 'Test result'), { back: 'mock' })}
+  const tm = ex.tm || {}, answered = ex.qs.filter(id => (ex.st[id] || {}).sel != null);
+  const avg = answered.length ? Math.round(answered.reduce((x, id) => x + (tm[id] || 0), 0) / answered.length / 1000) : 0;
+  const slow = ex.qs.filter(id => tm[id]).sort((a, b) => tm[b] - tm[a]).slice(0, 3).map(id => examQ(id, ex)).filter(Boolean);
+  const opp = ex.kind === 'friend' && ex.meta && ex.meta.opp;
+  const retake = MOCKS.some(mk => mk.id === ex.id) ? `<button class="btn btn-cta" data-act="mock-intro" data-id="${esc(ex.id)}">${ic('rotate')} ${L('फिर से दें', 'Retake')}</button>` : `<button class="btn btn-cta" data-act="exam-retake">${ic('rotate')} ${L('फिर से दें', 'Retake')}</button>`;
+  return `${appbar(L('परीक्षा परिणाम', 'Test result'), { back: ex.back || 'mock' })}
 <main class="page gutter">
   <section class="card result-hero">
     <div class="big-ring">${ring(p, 150, 12, p >= 0.5 ? 'var(--ring)' : 'var(--bad-solid)')}<b class="tnum">${fmtScore(R.score)}<small>/ ${R.max} ${L('अंक', 'marks')}</small></b></div>
@@ -1551,13 +1467,21 @@ function vExamResult() {
     <p class="muted" style="margin:0">${L('नेगेटिव मार्किंग सहित स्कोर', 'Score after negative marking')}</p>
     ${R.pts != null ? `<span class="pill pill-gold">${ic('coins')} +${fmtNum(R.pts)} ${L('पॉइंट्स', 'points')}</span>${R.bonus ? `<span class="small muted">${L(`इसमें मॉक बोनस +${R.bonus} शामिल`, `Includes a mock bonus of +${R.bonus}`)}</span>` : ''}` : ''}
   </section>
+  ${opp ? `<section class="card next"><span class="k">${L('दोस्त से तुलना', 'You vs your friend')}</span><h3>${R.score > opp.sc ? L('आप जीत गए! 🎉', 'You won! 🎉') : R.score === opp.sc ? L('बराबरी!', 'It\'s a tie!') : L(`${opp.n || 'दोस्त'} आगे रहे — फिर कोशिश करें`, `${opp.n || 'Your friend'} is ahead — try again`)}</h3>
+    <p>${L('आप', 'You')}: <b>${fmtScore(R.score)}/${R.max}</b> (${fmtSecs(R.timeSec)}) · ${esc(opp.n || L('दोस्त', 'Friend'))}: <b>${fmtScore(opp.sc)}/${opp.max}</b>${opp.sec ? ` (${fmtSecs(opp.sec)})` : ''}</p>
+    <button class="btn btn-cta btn-block" data-act="friend-share">${ic('share')} ${L('अपना स्कोर वापस भेजें', 'Send your score back')}</button></section>` : ''}
+  ${ex.kind === 'friend' && !opp ? `<section class="card next"><span class="k">${L('दोस्त को चुनौती', 'Challenge a friend')}</span><h3>${L('अब दोस्त की बारी!', 'Now it\'s your friend\'s turn!')}</h3><p>${L('लिंक/कोड भेजें — दोस्त यही प्रश्न हल करेगा और दोनों के स्कोर की तुलना होगी।', 'Send the link/code — your friend answers the same questions and you compare scores.')}</p><button class="btn btn-cta btn-block" data-act="friend-share">${ic('share')} ${L('चुनौती भेजें', 'Send the challenge')}</button></section>` : ''}
+  ${ex.kind === 'wchal' ? `<div class="note">${ic('swords')}<div>${R.firstTry ? L(`साप्ताहिक चुनौती का आपका आधिकारिक स्कोर ${fmtScore(R.score)}/${R.max} दर्ज हुआ।`, `Your official weekly challenge score of ${fmtScore(R.score)}/${R.max} is recorded.`) : L('यह अभ्यास प्रयास था — आधिकारिक स्कोर पहला प्रयास ही रहता है।', 'This was a practice attempt — your official score is your first attempt.')}</div></div>` : ''}
   <div class="stats">
     <div class="stat s-ok"><b>${R.c}</b><span>${L('सही', 'Correct')}</span></div><div class="stat s-bad"><b>${R.w}</b><span>${L('गलत', 'Wrong')}</span></div><div class="stat"><b>${R.u}</b><span>${L('छोड़े', 'Skipped')}</span></div>
     <div class="stat"><b>${pct(R.c, R.c + R.w)}%</b><span>${L('सटीकता', 'Accuracy')}</span></div><div class="stat"><b>${R.c + R.w}/${R.n}</b><span>${L('प्रयास', 'Attempted')}</span></div><div class="stat"><b class="tnum">${fmtSecs(R.timeSec)}</b><span>${L('समय', 'Time')}</span></div>
   </div>
+  <section class="card" style="display:flex;flex-direction:column;gap:8px"><h2 class="sec-title" style="font-size:1.05rem">${ic('clock')} ${L('समय विश्लेषण', 'Time analysis')}</h2>
+    <p class="small" style="margin:0">${L(`औसत ${avg} सेकंड प्रति हल किया प्रश्न। सही उत्तर पर +${ex.pos}, गलत पर −${fmtScore(ex.neg)}।`, `Average ${avg} seconds per answered question. +${ex.pos} per right answer, −${fmtScore(ex.neg)} per wrong one.`)}</p>
+    ${slow.length ? `<span class="small muted">${L('सबसे ज़्यादा समय लिया', 'Took the longest')}:</span><ul class="small" style="margin:0;padding-left:1.2em">${slow.map(q => `<li>${esc(qT(q).slice(0, 80))}${qT(q).length > 80 ? '…' : ''} — ${Math.round((tm[q.id] || 0) / 1000)} ${L('से.', 's')}</li>`).join('')}</ul>` : ''}</section>
   <section class="card"><h2 class="sec-title" style="font-size:1.05rem;margin-bottom:12px">${ic('chart')} ${L('विषयवार प्रदर्शन', 'Subject-wise performance')}</h2><div class="bars">${bars}</div></section>
   <section><h2 class="sec-title" style="margin-bottom:10px">${ic('list')} ${L('समाधान', 'Solutions')}</h2><div class="list">${sol}</div></section>
-  <div class="grid2"><button class="btn btn-cta" data-act="mock-intro" data-id="${esc(ex.id)}">${ic('rotate')} ${L('फिर से दें', 'Retake')}</button><a class="btn btn-grey" href="#mock">${L('सभी परीक्षाएँ', 'All tests')}</a></div>
+  <div class="grid2">${retake}<a class="btn btn-grey" href="#compete">${L('मुक़ाबला', 'Compete')}</a></div>
 </main>`;
 }
 
@@ -1569,11 +1493,13 @@ function vBookmarks() {
   const qList = qs.length
     ? `<button class="btn btn-cta" data-act="start-bookmarked">${ic('play')} ${L(`इन ${qs.length} प्रश्नों का अभ्यास करें`, `Practise these ${qs.length} questions`)}</button><div class="list">${qs.map(q => `<div class="review-item"><b>${esc(qT(q))}</b><span class="ans">${L('उत्तर', 'Answer')}: <span class="ans-ok">${esc(qO(q)[q.a])}</span></span><span class="small muted">${esc(subjName(q.s))}</span><div><button class="link" data-act="bm-q" data-id="${esc(q.id)}" style="color:var(--bad)">${ic('trash')} ${L('हटाएँ', 'Remove')}</button></div></div>`).join('')}</div>`
     : `<div class="card">${emptyState('bookmark', L('अभी कोई प्रश्न सहेजा नहीं गया', 'No saved questions yet'), L('क्विज खेलते समय "बुकमार्क" दबाकर कठिन प्रश्न यहाँ सहेजें।', 'Tap "Save" during a quiz to keep tricky questions here.'))}</div>`;
+  const ds = U.s.bm.d.map(id => m.days.find(d => d.id === id)).filter(Boolean);
+  const dList = ds.length ? `<div class="list">${ds.map(d => `<button class="row" data-act="day-goto" data-iso="${parseISO(todayISO()).getFullYear()}-${d.md}"><span class="row-ic" style="--c:var(--brand)">${ic('calendar')}</span><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(dT(d))}</span><span class="row-sub">${fmtMD(d.md)} · ${esc(kindLabel(d.k))}</span></span>${ic('chev-right', 'chev')}</button>`).join('')}</div>` : `<div class="card">${emptyState('calendar', L('कोई दिवस सहेजा नहीं गया', 'No saved days'), L('"आज का दिन" में "सहेजें" दबाएँ।', 'Tap "Save" in Today in History.'))}</div>`;
   const nList = ns.length ? ns.map(newsCard).join('') : `<div class="card">${emptyState('newspaper', L('कोई ख़बर सहेजी नहीं गई', 'No saved news'), L('करेंट अफेयर्स में किसी ख़बर को खोलकर "सहेजें" दबाएँ।', 'Open a current-affairs story and tap "Save".'))}</div>`;
-  return `${appbar(`${ic('bookmark')} ${L('बुकमार्क', 'Saved')}`)}
+  return `${appbar(`${ic('bookmark')} ${L('बुकमार्क', 'Saved')}`, { back: 'revise' })}
 <main class="page gutter">
-  <div class="seg" role="group" aria-label="${L('बुकमार्क प्रकार', 'Saved items')}"><button data-act="bm-tab" data-v="q" aria-pressed="${bmTab === 'q'}">${L('प्रश्न', 'Questions')} (${qs.length})</button><button data-act="bm-tab" data-v="n" aria-pressed="${bmTab === 'n'}">${L('समाचार', 'News')} (${ns.length})</button></div>
-  ${bmTab === 'q' ? qList : nList}
+  <div class="seg" style="grid-template-columns:repeat(3,minmax(0,1fr))" role="group" aria-label="${L('बुकमार्क प्रकार', 'Saved items')}"><button data-act="bm-tab" data-v="q" aria-pressed="${bmTab === 'q'}">${L('प्रश्न', 'Questions')} (${qs.length})</button><button data-act="bm-tab" data-v="n" aria-pressed="${bmTab === 'n'}">${L('समाचार', 'News')} (${ns.length})</button><button data-act="bm-tab" data-v="d" aria-pressed="${bmTab === 'd'}">${L('दिवस', 'Days')} (${ds.length})</button></div>
+  ${bmTab === 'q' ? qList : bmTab === 'd' ? dList : nList}
 </main>
 ${bottomNav('bookmarks')}`;
 }
@@ -1677,26 +1603,23 @@ function openPointsHistory() {
   ${log.length ? `<ul class="earn">${log.slice(0, 40).map(e => { const r = PTS_REASON[e.r] || [e.r, e.r]; return `<li><span class="earn-ic">${ic('coins')}</span><span class="row-main"><b>${L(r[0], r[1])}${e.c > 1 ? ` <span class="small muted">×${e.c}</span>` : ''}</b><span class="row-sub">${relTime(e.t)}</span></span><span class="pts">+${fmtNum(e.n)}</span></li>`; }).join('')}</ul>` : emptyState('coins', L('अभी कोई पॉइंट्स नहीं', 'No points yet'), L('क्विज खेलकर पॉइंट्स कमाना शुरू करें।', 'Play a quiz to start earning points.'))}`, { label: L('पॉइंट्स इतिहास', 'Points history') });
 }
 
-function weekBars() {
+function weekBars(mini = false) {
   const t = todayISO(), goal = U.s.goal || 10;
   const days = Array.from({ length: 7 }, (_, i) => addDays(t, i - 6));
   const counts = days.map(d => U.s.days[d] || 0);
   const max = Math.max(goal, ...counts);
-  return `<div class="week" role="img" aria-label="${L('पिछले 7 दिनों में हल किए प्रश्न', 'Questions answered in the last 7 days')}: ${counts.join(', ')}"><span class="goal-line" style="bottom:${(goal / max) * 100 * 0.72 + 14}%"></span>${days.map((d, i) => `<div class="col"><em>${counts[i] || ''}</em><span class="b ${counts[i] >= goal ? 'met' : ''}" style="height:${Math.max(3, (counts[i] / max) * 72)}%"></span><span>${d === t ? L('आज', 'Today') : WEEKDAYS_SHORT[LANG][parseISO(d).getDay()]}</span></div>`).join('')}</div>`;
+  return `<div class="week${mini ? ' mini' : ''}" role="img" aria-label="${L('पिछले 7 दिनों में हल किए प्रश्न', 'Questions answered in the last 7 days')}: ${counts.join(', ')}"><span class="goal-line" style="bottom:${(goal / max) * 100 * 0.72 + 14}%"></span>${days.map((d, i) => `<div class="col"><em>${counts[i] || ''}</em><span class="b ${counts[i] >= goal ? 'met' : ''}" style="height:${Math.max(3, (counts[i] / max) * 72)}%"></span><span>${d === t ? L('आज', 'Today') : WEEKDAYS_SHORT[LANG][parseISO(d).getDay()]}</span></div>`).join('')}</div>`;
 }
 const lbForm = { name: null };
 function vProfile() {
   const tot = U.totals(), st = U.streak(), s = U.s;
   const name = s.name.trim();
   const t = todayISO();
-  const subj = SUBJECTS.map(sj => { const x = U.subjStats(sj.k); return `<div class="bar-row" style="--c:${sj.c}"><span>${subjName(sj.k)}</span><span class="track"><i style="width:${pct(x.right, x.total)}%"></i></span><b>${pct(x.right, x.total)}%</b></div>`; }).join('');
   const where = LOCAL() ? L('इसी डिवाइस के ब्राउज़र में', 'in this device\'s browser') : P.progressRemote ? L('आपके खाते में (हर डिवाइस पर)', 'in your account (on every device)') : L('इसी ब्राउज़र में', 'in this browser');
   const scales = [[0.9, 'छोटा', 'Small'], [1, 'सामान्य', 'Normal'], [1.12, 'बड़ा', 'Large'], [1.25, 'बहुत बड़ा', 'Extra large']];
-  const earned = BADGES.filter(b => s.badges[b.id]).length;
-  const badges = BADGES.map(b => { const d = s.badges[b.id]; return `<li class="bdg${d ? ' got' : ''}" title="${esc(L(b.dhi, b.den))}"><span class="bdg-ic">${ic(d ? b.icon : 'lock')}</span><b>${esc(L(b.hi, b.en))}</b><span>${d ? fmtDate(d) : esc(L(b.dhi, b.den))}</span></li>`; }).join('');
   const rank = LB.myRank('week');
   const lbName = lbForm.name ?? s.lb.name;
-  return `${appbar(`${ic('user')} ${L('प्रोफ़ाइल', 'Profile')}`)}
+  return `${appbar(`${ic('user')} ${L('प्रोफ़ाइल और सेटिंग्स', 'Profile & settings')}`, { back: 'home' })}
 <main class="page gutter">
   <section class="card admin-hero" style="display:flex;align-items:center;gap:14px">
     <span class="avatar" style="width:58px;height:58px;font-size:1.5rem">${name ? esc(initial(name)) : ic('user')}</span>
@@ -1709,16 +1632,11 @@ function vProfile() {
     <div class="stats stats-4"><div class="stat"><b>${fmtNum(U.ptsToday())}</b><span>${L('आज', 'Today')}</span></div><div class="stat"><b>${fmtNum(U.ptsWeek(weekKey(t)))}</b><span>${L('इस सप्ताह', 'This week')}</span></div><div class="stat"><b>${fmtNum(U.ptsMonth(monthKey(t)))}</b><span>${L('इस महीने', 'This month')}</span></div><div class="stat"><b>${rank ? '#' + rank : '–'}</b><span>${L('सप्ताह रैंक', 'Week rank')}</span></div></div>
     <div class="btnrow"><a class="btn btn-sm btn-outline" href="#leaders">${ic('trophy')} ${L('लीडरबोर्ड', 'Leaderboard')}</a><button class="btn btn-sm btn-outline" data-act="pts-info">${ic('info')} ${L('पॉइंट्स कैसे मिलते हैं', 'How points work')}</button></div>
   </section>
-  <div class="stats">
-    <div class="stat"><b>${tot.attempts}</b><span>${L('कुल उत्तर', 'Answers')}</span></div><div class="stat s-ok"><b>${tot.acc}%</b><span>${L('सटीकता', 'Accuracy')}</span></div><div class="stat"><b>${earned}/${BADGES.length}</b><span>${L('बैज', 'Badges')}</span></div>
-    <div class="stat"><b>${st}</b><span>${L('स्ट्रीक (दिन)', 'Streak (days)')}</span></div><div class="stat"><b>${s.best || 0}</b><span>${L('सर्वश्रेष्ठ स्ट्रीक', 'Best streak')}</span></div><div class="stat"><b>${s.mocks.length}</b><span>${L('मॉक टेस्ट', 'Mock tests')}</span></div>
-  </div>
-  <section class="card"><h2 class="sec-title" style="font-size:1.05rem;margin-bottom:12px">${ic('award')} ${L('बैज', 'Badges')}</h2><ul class="bdgs">${badges}</ul></section>
-  <section class="card"><div class="sec-head" style="margin-bottom:6px"><h2 class="sec-title" style="font-size:1.05rem">${ic('chart')} ${L('पिछले 7 दिन', 'Last 7 days')}</h2><span class="small muted">${L(`लक्ष्य: ${s.goal}/दिन`, `Goal: ${s.goal}/day`)}</span></div>${weekBars()}<p class="small muted" style="margin:8px 0 0">${L(`रोज़ कम से कम ${STREAK_MIN} प्रश्न हल करने पर स्ट्रीक बढ़ती है।`, `Answer at least ${STREAK_MIN} questions a day to grow your streak.`)}</p></section>
-  <section class="card"><h2 class="sec-title" style="font-size:1.05rem;margin-bottom:12px">${ic('target')} ${L('विषयवार महारत', 'Subject mastery')}</h2><div class="bars">${subj}</div><p class="small muted" style="margin:10px 0 0">${L('हर विषय में पिछली बार सही हल किए प्रश्नों का प्रतिशत।', 'Share of questions in each subject you got right last time.')}</p></section>
+  <a class="act" href="#progress"><span class="ai">${ic('chart')}</span><span>${L('मेरी प्रगति', 'My progress')}<span class="row-sub">${L(`स्तर ${levelOf(s.pts.total).lvl} · सटीकता ${tot.acc}% · ${st} दिन की स्ट्रीक · बैज और विषयवार महारत`, `Level ${levelOf(s.pts.total).lvl} · ${tot.acc}% accuracy · ${st}-day streak · badges and subject mastery`)}</span></span>${ic('chev-right', 'chev')}</a>
   <section class="card" id="settings" style="display:flex;flex-direction:column;gap:14px">
     <h2 class="sec-title" style="font-size:1.05rem">${ic('sliders')} ${L('सेटिंग्स', 'Settings')}</h2>
     <div class="field"><span class="lbl">${ic('languages')} ${L('भाषा / Language', 'Language / भाषा')}</span><div class="chips">${[['hi', 'हिंदी'], ['en', 'English']].map(([v, l]) => `<button class="chip" data-act="set-lang" data-v="${v}" aria-pressed="${LANG === v}" lang="${v}">${l}</button>`).join('')}</div><span class="small muted">${L('प्रश्न, समाचार और पूरा ऐप चुनी गई भाषा में दिखेगा।', 'Questions, news and the whole app appear in the chosen language.')}</span></div>
+    <div class="field"><span class="lbl">${ic('graduation')} ${L('लक्ष्य परीक्षा', 'Target exam')}</span><div class="chips wrap">${EXAMS.map(e => `<button class="chip" data-act="set-exam" data-v="${e.id}" aria-pressed="${s.exam === e.id}">${esc(L(e.hi, e.en))}</button>`).join('')}</div></div>
     <div class="field"><span class="lbl">${L('रोज़ का लक्ष्य', 'Daily goal')}</span><div class="chips wrap">${[10, 20, 30].map(n => `<button class="chip" data-act="set-goal" data-v="${n}" aria-pressed="${s.goal === n}">${n} ${L('प्रश्न', 'questions')}</button>`).join('')}</div></div>
     <div class="field"><span class="lbl">${ic('type')} ${L('अक्षरों का आकार', 'Text size')}</span><div class="chips wrap">${scales.map(([v, hi, en]) => `<button class="chip" data-act="set-scale" data-v="${v}" aria-pressed="${Number(s.set.scale) === v}">${L(hi, en)}</button>`).join('')}</div></div>
     ${P.mode === 'standalone' ? `<div class="field"><span class="lbl">${ic('moon')} ${L('थीम', 'Theme')}</span><div class="chips">${[['system', 'सिस्टम', 'System'], ['light', 'लाइट', 'Light'], ['dark', 'डार्क', 'Dark']].map(([v, hi, en]) => `<button class="chip" data-act="set-theme" data-v="${v}" aria-pressed="${s.set.theme === v}">${L(hi, en)}</button>`).join('')}</div></div>` : ''}
@@ -1740,8 +1658,646 @@ function profileSheet() {
   onb.exam = U.s.exam; onb.goal = U.s.goal;
   openSheet(`${sheetHead(L('प्रोफ़ाइल बदलें', 'Edit profile'))}<form data-form="profile" style="display:flex;flex-direction:column;gap:14px">
   <div class="field"><label for="pf-name">${L('आपका नाम', 'Your name')}</label><input class="input" id="pf-name" maxlength="40" value="${esc(U.s.name)}" autocomplete="given-name"></div>
-  <div class="field"><span class="lbl">${L('लक्ष्य परीक्षा', 'Target exam')}</span><div class="chips wrap" id="pf-exam">${EXAMS.map(([v, en]) => `<button type="button" class="chip" data-act="onb-exam" data-v="${esc(v)}" aria-pressed="${onb.exam === v}">${esc(L(v, en))}</button>`).join('')}</div></div>
+  <div class="field"><span class="lbl">${L('लक्ष्य परीक्षा', 'Target exam')}</span><div class="chips wrap" id="pf-exam">${EXAMS.map(e => `<button type="button" class="chip" data-act="onb-exam" data-v="${e.id}" aria-pressed="${onb.exam === e.id}">${esc(L(e.hi, e.en))}</button>`).join('')}</div></div>
   <button class="btn btn-cta btn-block" type="submit">${ic('check')} ${L('सहेजें', 'Save')}</button></form>`, { label: L('प्रोफ़ाइल बदलें', 'Edit profile') });
+}
+
+// ───────────────────────────── v3: home dashboard, learn tree, revision, compete, progress, onboarding ─────────────────────────────
+const learnState = { ex: null };          // exam filter on Learn (null = the learner's exam)
+const diffPool = list => (U.s.set.diff ? list.filter(q => (q.d || 1) === U.s.set.diff) : list);
+const exPool = (list, ex) => (ex && ex !== 'all' ? list.filter(q => examsOf(q).includes(ex)) : list);
+const mLabel = lvl => `<span class="mlabel l${lvl}">${esc(L(MASTERY[lvl][0], MASTERY[lvl][1]))}</span>`;
+const qState = q => { const a = U.s.ans[q.id]; return !a ? ['', 'help', L('अभी नहीं किया', 'Not tried')] : a.l ? ['ok', 'check', L('पिछली बार सही', 'Right last time')] : ['bad', 'x', L('पिछली बार गलत', 'Wrong last time')]; };
+const dataAttrs = d => Object.entries(d || {}).map(([k, v]) => ` data-${k}="${esc(v)}"`).join('');
+const practiceOpts = () => { const st = U.s.set; return `<div class="chips" role="group" aria-label="${L('अभ्यास सेटिंग', 'Practice settings')}"><button class="chip" data-act="set-mode" data-v="practice" aria-pressed="${st.mode !== 'timed'}">${L('अभ्यास', 'Practice')}</button><button class="chip" data-act="set-mode" data-v="timed" aria-pressed="${st.mode === 'timed'}">${ic('clock')} ${L(`समयबद्ध · ${TIMED_SECONDS} से.`, `Timed · ${TIMED_SECONDS}s`)}</button>${[10, 20, 0].map(n => `<button class="chip" data-act="set-count" data-v="${n}" aria-pressed="${(st.count ?? 10) === n}">${n ? L(`${n} प्रश्न`, `${n} Qs`) : L('सभी', 'All')}</button>`).join('')}</div>`; };
+const diffChips = () => `<div class="chips" role="group" aria-label="${L('कठिनाई', 'Difficulty')}">${[0, 1, 2, 3].map(d => `<button class="chip" data-act="set-diff" data-v="${d}" aria-pressed="${(U.s.set.diff || 0) === d}">${d ? esc(diffLabel(d)) : L('सभी स्तर', 'All levels')}</button>`).join('')}</div>`;
+
+// The single most useful thing to do next.
+function nextChapter() {
+  const ex = U.s.exam || 'gk';
+  const rel = CHAPTERS.filter(c => c.s !== 'days' && c.ex.includes(ex) && (M().byCh[c.id] || []).length);
+  const st = rel.map(c => ({ c, s: U.chStats(c.id) }));
+  const started = st.filter(x => x.s.seen && x.s.cov < 100).sort((a, b) => b.s.cov - a.s.cov)[0];
+  const fresh = st.find(x => !x.s.seen);
+  return (started || fresh || {}).c || null;
+}
+function nextAction() {
+  const t = todayISO();
+  if (E && !E.submitted) return { title: L('आपकी परीक्षा अधूरी है', 'Your test is unfinished'), sub: examTitle(E), cta: L('परीक्षा जारी रखें', 'Resume test'), act: 'exam-resume' };
+  const sv = savedSession();
+  if (sv) return { title: L('जहाँ छोड़ा था, वहीं से शुरू करें', 'Pick up where you left off'), sub: `${L(sv.title[0], sv.title[1])} · ${Object.keys(sv.ans || {}).length}/${sv.ids.length} ${L('हल किए', 'done')}`, cta: L('जारी रखें', 'Continue'), act: 'resume' };
+  if (!U.s.daily[t] && C.baseState === 'ok') return { title: L('आज की दैनिक चुनौती', 'Today\'s daily challenge'), sub: L(`10 प्रश्न · लगभग 5 मिनट · पूरा करने पर +${PTS.daily} पॉइंट्स`, `10 questions · about 5 minutes · +${PTS.daily} points when done`), cta: L('चुनौती शुरू करें', 'Start the challenge'), act: 'start-daily' };
+  const due = U.due().length;
+  if (due) return { title: L(`${due} प्रश्न दोहराने का समय आ गया`, `${due} questions are due for revision`), sub: L('सही समय पर दोहराने से याद लंबे समय तक रहती है।', 'Revising at the right time makes learning stick.'), cta: L('दोहराव शुरू करें', 'Start revision'), act: 'start-revision' };
+  const weak = U.weakTopics(1)[0];
+  if (weak) return { title: L(`कमज़ोर विषय: ${weak.t}`, `Weak topic: ${weak.tEn}`), sub: L(`सटीकता ${weak.acc}% — इसे मज़बूत करें`, `${weak.acc}% accuracy — let's strengthen it`), cta: L('अभ्यास करें', 'Practise'), act: 'practice-topic', data: { ch: weak.ch, t: weak.t } };
+  const ch = nextChapter();
+  if (ch) return { title: L(`अगला अध्याय: ${ch.hi}`, `Next chapter: ${ch.en}`), sub: `${subjName(ch.s)} · ${U.chStats(ch.id).cov}% ${L('पूरा', 'done')}`, cta: L('अभ्यास करें', 'Practise'), act: 'practice-ch', data: { ch: ch.id } };
+  return { title: L('बहुत बढ़िया — आज का काम पूरा!', 'Great — today\'s work is done!'), sub: L('एक मॉक टेस्ट से अपनी तैयारी परखें।', 'Test yourself with a mock exam.'), cta: L('मॉक टेस्ट देखें', 'See mock tests'), act: 'nav', data: { to: 'mock' } };
+}
+function recommendations(skip) {
+  const out = [], t = todayISO(), m = M();
+  const add = (icon, title, sub, act, data) => { if (act !== skip && out.length < 4) out.push({ icon, title, sub, act, data }); };
+  const due = U.due().length;
+  if (due) add('rotate', L(`${due} प्रश्नों का दोहराव`, `Revise ${due} questions`), L('स्पेस्ड रिपीटिशन से याद पक्की करें', 'Spaced repetition makes it stick'), 'start-revision');
+  for (const w of U.weakTopics(2)) add('target', L(`कमज़ोर: ${w.t}`, `Weak: ${w.tEn}`), `${chName(w.ch)} · ${L('सटीकता', 'accuracy')} ${w.acc}%`, 'practice-topic', { ch: w.ch, t: w.t });
+  const ch = nextChapter();
+  if (ch) add('layers', L(`अध्याय: ${ch.hi}`, `Chapter: ${ch.en}`), `${subjName(ch.s)} · ${examLabel(U.s.exam || 'gk')} ${L('के लिए', 'relevant')}`, 'nav', { to: 'chapter/' + ch.id });
+  const wk = weekKey(t);
+  if (!U.s.wc[wk] && C.baseState === 'ok') add('swords', L('साप्ताहिक चुनौती', 'Weekly challenge'), L('सबके लिए एक जैसे 15 प्रश्न · एक प्रयास', 'The same 15 questions for everyone · one attempt'), 'nav', { to: 'compete' });
+  if ((m.bySubj.ca || []).length) add('newspaper', L('करेंट अफेयर्स क्विज', 'Current affairs quiz'), L('नवीनतम ख़बरों से 10 प्रश्न', '10 questions from the latest news'), 'start-ca');
+  return out;
+}
+const recRow = r => `<button class="row" data-act="${r.act}"${dataAttrs(r.data)}><span class="row-ic" style="--c:var(--brand)">${ic(r.icon)}</span><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(r.title)}</span><span class="row-sub">${esc(r.sub)}</span></span>${ic('chev-right', 'chev')}</button>`;
+
+function vHome() {
+  const m = M(), t = todayISO(), s = U.s;
+  const name = s.name.trim(), goal = s.goal || 10, cnt = U.todayCount(), st = U.streak();
+  const na = nextAction();
+  const wk = weekKey(t), ws = U.rangeStats(wk, addDays(wk, 6)), rank = LB.myRank('week');
+  const recent = s.recent.filter(r => (m.byCh[r.ch] || []).length).slice(0, 5);
+  const weak = U.weakTopics(3);
+  const caToday = m.news.filter(n => n.date === t).length, dayToday = (m.daysByMd[t.slice(5)] || [])[0];
+  return `${topbar(`${capLogo()}<span>MY <span class="q">QUIZ</span></span>`)}
+<section class="welcome"><div class="gutter"><h2>${L('नमस्कार', 'Hello')}${name ? `, ${esc(name)}` : ''}!</h2><p>${s.exam ? `${esc(examLabel(s.exam))} ${L('की तैयारी', 'preparation')} · ` : ''}${L(`रोज़ ${goal} प्रश्न का लक्ष्य`, `goal: ${goal} questions a day`)}</p></div></section>
+<main class="page gutter dash">
+  ${C.baseState === 'error' ? dataErrorNote() : ''}
+  <section class="card next" aria-label="${L('आपका अगला क़दम', 'Your next step')}">
+    <span class="k">${L('आपका अगला क़दम', 'Your next step')}</span>
+    <h3>${esc(na.title)}</h3><p>${esc(na.sub)}</p>
+    <div class="ringbox" role="img" aria-label="${L(`आज ${goal} में से ${cnt} प्रश्न`, `${cnt} of ${goal} questions today`)}">${ring(cnt / goal, 76, 7, cnt >= goal ? 'var(--ok-solid)' : 'var(--ring)')}<b class="tnum">${Math.min(cnt, 999)}<small>/ ${goal}</small></b></div>
+    <button class="btn btn-cta btn-block" data-act="${na.act}"${dataAttrs(na.data)} ${C.baseState === 'loading' ? 'disabled' : ''}>${esc(na.cta)} ${ic('arrow-right')}</button>
+    <div class="meta-row"><span>${ic('flame')} <b>${st}</b> ${L('दिन की स्ट्रीक', 'day streak')}</span><span>${ic('coins')} <b>${fmtNum(U.ptsToday())}</b> ${L('पॉइंट्स आज', 'points today')}</span></div>
+  </section>
+  <section class="sec" aria-label="${L('यह सप्ताह', 'This week')}">
+    <div class="sec-head"><h2 class="sec-title">${ic('chart')} ${L('यह सप्ताह', 'This week')}</h2><a class="link" href="#progress">${L('पूरी प्रगति', 'Full progress')} ${ic('chev-right')}</a></div>
+    <div class="card">${weekBars(true)}<div class="meta-row" style="margin-top:8px"><span><b>${ws.n}</b> ${L('प्रश्न', 'questions')}</span><span><b>${ws.acc}%</b> ${L('सटीकता', 'accuracy')}</span><span><b>${fmtNum(ws.pts)}</b> ${L('पॉइंट्स', 'points')}</span>${rank ? `<span>${L('रैंक', 'Rank')} <b>#${rank}</b></span>` : ''}</div></div>
+  </section>
+  ${recent.length ? `<section class="sec"><h2 class="sec-title">${ic('book-open')} ${L('पढ़ाई जारी रखें', 'Continue learning')}</h2><div class="hscroll">${recent.map(r => { const x = U.chStats(r.ch); return `<a class="mini-card" href="#chapter/${esc(r.ch)}"><span class="s">${esc(subjName((CHM[r.ch] || {}).s || ''))}</span><span class="t">${esc(chName(r.ch))}</span><span class="s">${x.cov}% ${L('पूरा', 'done')} · ${mLabel(x.level)}</span><span class="minibar ${x.level >= 3 ? 'ok' : ''}"><i style="width:${x.cov}%"></i></span></a>`; }).join('')}</div></section>` : ''}
+  <section class="sec"><h2 class="sec-title">${ic('sparkles')} ${L('आपके लिए सुझाव', 'Recommended for you')}</h2><div class="list">${recommendations(na.act).map(recRow).join('') || `<div class="empty">${L('अभी कोई सुझाव नहीं — कुछ प्रश्न हल करें।', 'No suggestions yet — answer a few questions.')}</div>`}</div></section>
+  ${weak.length ? `<section class="sec"><h2 class="sec-title">${ic('target')} ${L('कमज़ोर विषय', 'Weak topics')}</h2><div class="list">${weak.map(w => `<button class="row" data-act="practice-topic" data-ch="${esc(w.ch)}" data-t="${esc(w.t)}"><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(L(w.t, w.tEn))}</span><span class="row-sub">${esc(chName(w.ch))}</span><span class="minibar"><i style="width:${w.acc}%;background:var(--bad-solid)"></i></span></span><span class="pct">${w.acc}%</span>${ic('chev-right', 'chev')}</button>`).join('')}</div></section>` : ''}
+  <section class="sec"><h2 class="sec-title">${ic('calendar')} ${L('आज की पढ़ाई', 'Today\'s reading')}</h2>
+    <div class="split"><a class="tile2" href="#ca">${ic('newspaper')}<b>${L('करेंट अफेयर्स', 'Current affairs')}</b><span>${caToday ? L(`आज की ${caToday} ख़बरें`, `${caToday} stories today`) : m.news[0] ? `${L('नवीनतम', 'Latest')}: ${fmtDate(m.news[0].date, false)}` : ''}</span></a>
+    <a class="tile2" href="#today">${ic('calendar')}<b>${L('आज का दिन', 'Today in History')}</b><span>${dayToday ? esc(dT(dayToday)) : L('इतिहास में आज और 5 प्रश्न', 'On this day and 5 questions')}</span></a></div>
+  </section>
+  ${P.isAdmin ? `<a class="act" href="#admin"><span class="ai">${ic('settings')}</span><span>${L('एडमिन पैनल', 'Admin panel')}<span class="row-sub">${LOCAL() ? L('डेमो: बदलाव इसी ब्राउज़र में', 'Demo: changes stay in this browser') : L('सामग्री, AI प्रश्न, समीक्षा, प्रकाशन और पुरस्कार', 'Content, AI questions, review, publishing and prizes')}</span></span>${ic('chev-right', 'chev')}</a>` : ''}
+</main>
+${bottomNav('home')}`;
+}
+
+// ── Learn: subjects → chapters → topics ──
+function vLearn() {
+  const m = M(), ex = learnState.ex ?? (U.s.exam || 'all');
+  const subj = SUBJECTS.map(sj => {
+    const list = exPool(m.bySubj[sj.k] || [], ex);
+    if (!list.length) return '';
+    const x = U.stats(list), chs = chaptersOf(sj.k).filter(c => exPool(m.byCh[c.id] || [], ex).length).length;
+    return `<a class="row" href="#subject/${sj.k}" style="--c:${sj.c}"><span class="row-ic">${ic(sj.icon)}</span><span class="row-main"><span class="row-title">${subjName(sj.k)}</span><span class="row-sub">${L(`${chs} अध्याय · ${list.length} प्रश्न`, `${chs} chapters · ${list.length} questions`)} · ${mLabel(x.level)}</span><span class="minibar ${x.level >= 3 ? 'ok' : ''}"><i style="width:${x.cov}%"></i></span></span><span class="pct">${x.cov}%</span>${ic('chev-right', 'chev')}</a>`;
+  }).join('');
+  const due = U.due().length, wrong = Object.values(U.s.ans).filter(a => !a.l).length;
+  return `${topbar(L('सीखें', 'Learn'))}
+<main class="page gutter">
+  <button class="search" data-act="search-open" style="width:100%;cursor:text;text-align:left">${ic('search')}<span class="muted">${L('प्रश्न, विषय या शब्द खोजें', 'Search questions, topics or words')}</span></button>
+  <div class="sec"><span class="small muted">${ic('graduation')} ${L('परीक्षा के अनुसार', 'By exam')}</span><div class="chips" role="group" aria-label="${L('परीक्षा', 'Exam')}"><button class="chip" data-act="learn-ex" data-v="all" aria-pressed="${ex === 'all'}">${L('सभी', 'All')}</button>${EXAMS.map(e => `<button class="chip" data-act="learn-ex" data-v="${e.id}" aria-pressed="${ex === e.id}">${esc(L(e.hi, e.en))}</button>`).join('')}</div></div>
+  ${C.baseState === 'error' ? dataErrorNote() : ''}
+  <section class="sec"><h2 class="sec-title">${ic('layers')} ${L('विषय', 'Subjects')}</h2><div class="list">${C.baseState === 'loading' ? skeletonRows(5) : subj || emptyState('layers', L('इस परीक्षा के लिए अभी प्रश्न नहीं', 'No questions for this exam yet'), '')}</div></section>
+  <section class="sec"><h2 class="sec-title">${ic('calendar')} ${L('रोज़ की पढ़ाई', 'Daily learning')}</h2>
+    <div class="split"><a class="tile2" href="#ca">${ic('newspaper')}<b>${L('करेंट अफेयर्स', 'Current affairs')}</b><span>${L('दैनिक, साप्ताहिक, मासिक', 'Daily, weekly, monthly')}</span></a><a class="tile2" href="#today">${ic('calendar')}<b>${L('आज का दिन', 'Today in History')}</b><span>${L('3–5 मिनट का दैनिक सत्र', 'A 3–5 minute daily session')}</span></a></div></section>
+  <section class="sec"><div class="sec-head"><h2 class="sec-title">${ic('rotate')} ${L('दोहराव', 'Revision')}</h2><a class="link" href="#revise">${L('सब देखें', 'See all')} ${ic('chev-right')}</a></div>
+    <div class="split"><button class="tile2" data-act="start-revision"><span class="n tnum">${due}</span><b>${L('आज दोहराने हैं', 'Due today')}</b><span>${L('स्पेस्ड रिपीटिशन', 'Spaced repetition')}</span></button><a class="tile2" href="#cards"><span class="n">${ic('cards')}</span><b>${L('फ़्लैशकार्ड', 'Flashcards')}</b><span>${L('जल्दी दोहराव', 'Quick recall')}</span></a>
+    <button class="tile2" data-act="practice-mistakes"><span class="n tnum">${wrong}</span><b>${L('गलतियाँ', 'Mistakes')}</b><span>${L('फिर से हल करें', 'Try them again')}</span></button><a class="tile2" href="#bookmarks"><span class="n tnum">${U.s.bm.q.length + U.s.bm.n.length}</span><b>${L('सहेजे गए', 'Saved')}</b><span>${L('प्रश्न और ख़बरें', 'Questions and news')}</span></a></div></section>
+</main>
+${bottomNav('learn')}`;
+}
+function vSubject() {
+  const k = routeArg, sj = SUBJ[k];
+  if (!sj) return redirect('learn');
+  const m = M(), all = m.bySubj[k] || [], x = U.stats(all), pool = diffPool(all);
+  const weak = U.weakTopics(3, k);
+  const chs = chaptersOf(k).map(c => {
+    const list = m.byCh[c.id] || [], cx = U.stats(list), topics = uniq(list.map(q => q.t || '')).filter(Boolean).length, nd = diffPool(list).length;
+    return `<a class="row" href="#chapter/${esc(c.id)}"><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(L(c.hi, c.en))}</span><span class="row-sub">${L(`${list.length} प्रश्न`, `${list.length} questions`)}${topics > 1 ? ` · ${L(`${topics} विषय`, `${topics} topics`)}` : ''}${U.s.set.diff ? ` · ${nd} ${esc(diffLabel(U.s.set.diff))}` : ''} · ${mLabel(cx.level)}</span><span class="minibar ${cx.level >= 3 ? 'ok' : ''}"><i style="width:${cx.cov}%"></i></span></span><span class="pct">${cx.cov}%</span>${ic('chev-right', 'chev')}</a>`;
+  }).join('');
+  return `${appbar(esc(subjName(k)), { back: 'learn', right: `<button class="iconbtn" data-act="search-open" aria-label="${L('प्रश्न खोजें', 'Search questions')}">${ic('search')}</button>` })}
+<main class="page gutter">
+  <section class="card sum"><div class="sum-top"><div class="ringbox">${ring(x.cov / 100, 64, 6)}<b class="tnum" style="font-size:.9rem">${x.cov}%</b></div><span class="row-main"><b>${esc(subjName(k))}</b><span class="row-sub">${L(`${all.length} प्रश्न · सटीकता ${x.acc}%`, `${all.length} questions · ${x.acc}% accuracy`)} · ${mLabel(x.level)}</span></span></div>
+    <div class="grid2"><button class="btn btn-cta" data-act="start-subject" data-s="${k}" ${pool.length ? '' : 'disabled'}>${ic('play')} ${L('अभ्यास', 'Practise')}</button><button class="btn btn-outline" data-act="exam-pool" data-s="${k}" ${pool.length >= 3 ? '' : 'disabled'}>${ic('clock')} ${L('परीक्षा मोड', 'Exam mode')}</button></div>
+    <p class="small muted" style="margin:0">${L('अभ्यास: हर उत्तर पर तुरंत व्याख्या। परीक्षा मोड: समय-सीमा, उत्तर अंत में।', 'Practice: instant explanation after every answer. Exam mode: timed, answers only at the end.')}</p></section>
+  ${diffChips()}
+  ${practiceOpts()}
+  <section class="sec"><h2 class="sec-title">${ic('layers')} ${L('अध्याय', 'Chapters')}</h2><div class="list">${chs || emptyState('layers', L('अभी कोई अध्याय नहीं', 'No chapters yet'), '')}</div></section>
+  ${weak.length ? `<section class="sec"><h2 class="sec-title">${ic('target')} ${L('इस विषय में कमज़ोर', 'Weak in this subject')}</h2><div class="list">${weak.map(w => `<button class="row" data-act="practice-topic" data-ch="${esc(w.ch)}" data-t="${esc(w.t)}"><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(L(w.t, w.tEn))}</span><span class="row-sub">${esc(chName(w.ch))}</span></span><span class="pct">${w.acc}%</span>${ic('chev-right', 'chev')}</button>`).join('')}</div></section>` : ''}
+</main>
+${bottomNav('learn')}`;
+}
+function vChapter() {
+  const id = routeArg, c = CHM[id] || chaptersOf(String(id).replace(/-other$/, '')).find(x => x.id === id);
+  if (!c) return redirect('learn');
+  const m = M(), all = m.byCh[id] || [], x = U.stats(all), pool = diffPool(all);
+  const topics = {};
+  for (const q of all) { const k = q.t || ''; (topics[k] = topics[k] || { t: k, tEn: (q.en && q.en.t) || k, list: [] }).list.push(q); }
+  const tl = Object.values(topics);
+  const ex = CHM[id] ? CHM[id].ex : ['gk'];
+  return `${appbar(esc(L(c.hi, c.en)), { back: 'subject/' + c.s })}
+<main class="page gutter">
+  <section class="card sum"><div class="sum-top"><div class="ringbox">${ring(x.cov / 100, 64, 6)}<b class="tnum" style="font-size:.9rem">${x.cov}%</b></div><span class="row-main"><span class="row-sub">${esc(subjName(c.s))}</span><b>${esc(L(c.hi, c.en))}</b><span class="row-sub">${L(`${all.length} प्रश्न · सटीकता ${x.acc}%`, `${all.length} questions · ${x.acc}% accuracy`)} · ${mLabel(x.level)}</span></span></div>
+    <div><span class="small muted">${L('इन परीक्षाओं के लिए उपयोगी', 'Useful for')}:</span> <span class="excats">${ex.map(e => `<span class="tag">${esc(examLabel(e))}</span>`).join('')}</span></div>
+    <div class="grid2"><button class="btn btn-cta" data-act="practice-ch" data-ch="${esc(id)}" ${pool.length ? '' : 'disabled'}>${ic('play')} ${L('अभ्यास', 'Practise')}</button><button class="btn btn-outline" data-act="exam-pool" data-ch="${esc(id)}" ${pool.length >= 3 ? '' : 'disabled'}>${ic('clock')} ${L('परीक्षा मोड', 'Exam mode')}</button></div>
+    <div class="grid2"><button class="btn btn-outline" data-act="cards-start" data-src="ch:${esc(id)}" ${all.length ? '' : 'disabled'}>${ic('cards')} ${L('फ़्लैशकार्ड', 'Flashcards')}</button>${AI.available() ? `<button class="btn btn-outline" data-act="ai-notes" data-ch="${esc(id)}">${ic('sparkles')} ${L('AI नोट्स', 'AI notes')}</button>` : `<button class="btn btn-outline" data-act="notes-ch" data-ch="${esc(id)}">${ic('printer')} ${L('नोट्स', 'Notes')}</button>`}</div></section>
+  ${diffChips()}
+  ${practiceOpts()}
+  ${tl.length > 1 ? `<section class="sec"><h2 class="sec-title">${ic('target')} ${L('विषय', 'Topics')}</h2><div class="list">${tl.map(tp => { const tx2 = U.stats(tp.list); return `<button class="row" data-act="practice-topic" data-ch="${esc(id)}" data-t="${esc(tp.t)}"><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(L(tp.t, tp.tEn))}</span><span class="row-sub">${L(`${tp.list.length} प्रश्न`, `${tp.list.length} questions`)} · ${mLabel(tx2.level)}</span><span class="minibar"><i style="width:${tx2.cov}%"></i></span></span><span class="pct">${tx2.cov}%</span>${ic('chev-right', 'chev')}</button>`; }).join('')}</div></section>` : ''}
+  <section class="sec"><div class="sec-head"><h2 class="sec-title">${ic('list')} ${L('प्रश्न बैंक', 'Question bank')}</h2><span class="small muted">${pool.length}${U.s.set.diff ? ' · ' + esc(diffLabel(U.s.set.diff)) : ''}</span></div>
+    <div class="list">${pool.map(q => { const [cls, icon, label] = qState(q); return `<button class="qrow" data-act="open-q" data-id="${esc(q.id)}"><span class="qst ${cls}" role="img" aria-label="${esc(label)}">${ic(icon)}</span><span class="qt">${esc(qT(q))}<br>${diffBars(q.d)}${U.isBm('q', q.id) ? ` · <span class="small muted">${ic('bookmark', 'fill')}</span>` : ''}</span></button>`; }).join('') || emptyState('filter', L('इस स्तर का कोई प्रश्न नहीं', 'No questions at this level'), '')}</div></section>
+</main>
+${bottomNav('learn')}`;
+}
+
+// ── Revision hub and flashcards ──
+function vRevise() {
+  const m = M(), due = U.due().length;
+  const wrongIds = Object.entries(U.s.ans).filter(([id, a]) => !a.l && m.byId.has(id)).sort((a, b) => (b[1].t || 0) - (a[1].t || 0)).map(([id]) => id);
+  const counts = [0, 0, 0, 0, 0];
+  for (const c of CHAPTERS) if ((m.byCh[c.id] || []).length) counts[U.chStats(c.id).level]++;
+  const weak = U.weakTopics(5);
+  return `${appbar(`${ic('rotate')} ${L('दोहराव', 'Revision')}`, { back: 'learn' })}
+<main class="page gutter">
+  <section class="card next"><span class="k">${L('स्मार्ट दोहराव', 'Smart revision')}</span><h3>${due ? L(`आज ${due} प्रश्न दोहराने हैं`, `${due} questions due today`) : L('आज कोई दोहराव बाकी नहीं', 'Nothing due today')}</h3>
+    <p>${L('गलत हुए प्रश्न 1, 3, 7, 14 और 30 दिन बाद फिर आते हैं — हर सही उत्तर के साथ अंतराल बढ़ता है।', 'Questions you miss come back after 1, 3, 7, 14 and 30 days — each right answer stretches the gap.')}</p>
+    <div class="ringbox"><span class="lvl-badge" style="width:56px;height:56px">${ic('rotate')}</span></div>
+    <button class="btn btn-cta btn-block" data-act="start-revision" ${due ? '' : 'disabled'}>${ic('play')} ${L('दोहराव शुरू करें', 'Start revision')}</button></section>
+  <div class="split">
+    <button class="tile2" data-act="cards-start" data-src="due">${ic('cards')}<b>${L('फ़्लैशकार्ड', 'Flashcards')}</b><span>${L('याद है या नहीं — ख़ुद परखें', 'Test your recall')}</span></button>
+    <button class="tile2" data-act="practice-mistakes" ${wrongIds.length ? '' : 'disabled'}>${ic('x')}<b>${L(`गलतियाँ (${wrongIds.length})`, `Mistakes (${wrongIds.length})`)}</b><span>${L('पिछली बार गलत हुए प्रश्न', 'Wrong last time')}</span></button>
+    <a class="tile2" href="#bookmarks">${ic('bookmark')}<b>${L(`सहेजे गए (${U.s.bm.q.length})`, `Saved (${U.s.bm.q.length})`)}</b><span>${L('बुकमार्क प्रश्न और ख़बरें', 'Saved questions and news')}</span></a>
+    <button class="tile2" data-act="cards-start" data-src="saved" ${U.s.bm.q.length ? '' : 'disabled'}>${ic('star')}<b>${L('सहेजे प्रश्नों के कार्ड', 'Saved as cards')}</b><span>${L('बुकमार्क से फ़्लैशकार्ड', 'Flashcards from saved')}</span></button>
+  </div>
+  <section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('layers')} ${L('अध्यायों में महारत', 'Chapter mastery')}</h2>
+    <div class="cmp">${MASTERY.map((mm, i) => `<span>${mLabel(i)}</span><span></span><b>${counts[i]}</b>`).reverse().join('')}</div>
+    <p class="small muted" style="margin:0">${L('महारत = अध्याय के सभी प्रश्न किए और 90%+ पिछली बार सही।', 'Mastered = every question in the chapter tried and 90%+ right last time.')}</p></section>
+  ${weak.length ? `<section class="sec"><h2 class="sec-title">${ic('target')} ${L('कमज़ोर विषयों का दोहराव', 'Revise weak topics')}</h2><div class="list">${weak.map(w => `<button class="row" data-act="practice-topic" data-ch="${esc(w.ch)}" data-t="${esc(w.t)}"><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(L(w.t, w.tEn))}</span><span class="row-sub">${esc(chName(w.ch))}</span></span><span class="pct">${w.acc}%</span>${ic('chev-right', 'chev')}</button>`).join('')}</div></section>` : ''}
+  ${wrongIds.length ? `<section class="sec"><h2 class="sec-title">${ic('list')} ${L('हाल की गलतियाँ', 'Recent mistakes')}</h2><div class="list">${wrongIds.slice(0, 8).map(id => { const q = m.byId.get(id); return `<button class="qrow" data-act="open-q" data-id="${esc(id)}"><span class="qst bad" role="img" aria-label="${L('पिछली बार गलत', 'Wrong last time')}">${ic('x')}</span><span class="qt">${esc(qT(q))}</span></button>`; }).join('')}</div></section>` : ''}
+</main>
+${bottomNav('learn')}`;
+}
+let FC = null; // flashcard deck {src, ids, i, flip, known, forgot}
+function deckFor(src) {
+  const m = M();
+  let ids = [];
+  if (src === 'due') ids = U.due();
+  if (src === 'saved') ids = U.s.bm.q.slice();
+  if (src === 'mistakes' || (src === 'due' && ids.length < 5)) ids = uniq([...ids, ...Object.entries(U.s.ans).filter(([, a]) => !a.l).map(([id]) => id)]);
+  if (src.startsWith('ch:')) ids = shuffle((m.byCh[src.slice(3)] || []).map(q => q.id));
+  if (!ids.length) ids = shuffle(m.qs.filter(q => !U.s.ans[q.id]).map(q => q.id)).slice(0, 15); // nothing to revise: new cards
+  return ids.filter(id => m.byId.has(id)).slice(0, 20);
+}
+function vCards() {
+  if (!FC || !FC.ids.length) FC = { src: 'due', ids: deckFor('due'), i: 0, flip: false, known: 0, forgot: 0 };
+  const n = FC.ids.length;
+  if (FC.i >= n) {
+    return `${appbar(`${ic('cards')} ${L('फ़्लैशकार्ड', 'Flashcards')}`, { back: 'revise' })}
+<main class="page gutter"><section class="card result-hero"><span class="lvl-badge">${ic('check')}</span><h2 style="margin:8px 0 0;font-size:1.25rem">${L('डेक पूरा हुआ!', 'Deck complete!')}</h2>
+  <div class="stats" style="width:100%"><div class="stat s-ok"><b>${FC.known}</b><span>${L('याद था', 'Knew it')}</span></div><div class="stat s-bad"><b>${FC.forgot}</b><span>${L('भूल गए', 'Forgot')}</span></div><div class="stat"><b>${n}</b><span>${L('कार्ड', 'Cards')}</span></div></div>
+  <p class="muted small" style="margin:0">${L('भूले हुए कार्ड कल फिर आएँगे।', 'Cards you forgot will come back tomorrow.')}</p></section>
+  <div class="grid2"><button class="btn btn-cta" data-act="cards-start" data-src="${esc(FC.src)}">${ic('rotate')} ${L('फिर से', 'Again')}</button><a class="btn btn-grey" href="#revise">${L('दोहराव', 'Revision')}</a></div></main>`;
+  }
+  const q = M().byId.get(FC.ids[FC.i]);
+  if (!q) { FC.i++; return vCards(); }
+  const o = qO(q);
+  return `${appbar(`${ic('cards')} ${L('फ़्लैशकार्ड', 'Flashcards')}`, { back: 'revise', right: langBtn() })}
+<main class="page gutter">
+  <div class="progress" role="progressbar" aria-label="${L('प्रगति', 'Progress')}" aria-valuemin="0" aria-valuemax="${n}" aria-valuenow="${FC.i}"><i style="width:${(FC.i / n) * 100}%"></i></div>
+  <p class="fc-count">${L('कार्ड', 'Card')} ${FC.i + 1} / ${n} · ${esc(chName(chOf(q)))}</p>
+  <article class="fc" aria-live="polite">
+    <p class="fc-q">${esc(qT(q))}</p>
+    ${FC.flip ? `<div class="fc-a"><b>${ic('check')} ${esc(o[q.a])}</b>${esc(qE(q))}</div>` : `<p class="small muted" style="margin:0">${L('पहले मन में उत्तर सोचें, फिर देखें।', 'Think of the answer first, then reveal it.')}</p>`}
+    ${FC.flip ? `<div class="grid2"><button class="btn btn-danger" data-act="card-grade" data-v="0">${ic('x')} ${L('भूल गया', 'Forgot')}</button><button class="btn btn-cta" data-act="card-grade" data-v="1">${ic('check')} ${L('याद था', 'Knew it')}</button></div>` : `<button class="btn btn-navy btn-block" data-act="card-flip">${ic('eye')} ${L('उत्तर देखें', 'Show answer')}</button>`}
+  </article>
+</main>`;
+}
+
+// ── Compete ──
+const wchalIds = wk => {
+  const m = M(), pool = m.qs.filter(q => q.s !== 'ca').sort((a, b) => a.id.localeCompare(b.id));
+  const ca = (m.bySubj.ca || []).slice().sort((a, b) => newsDate(b).localeCompare(newsDate(a)) || a.id.localeCompare(b.id)).slice(0, 10);
+  return [...shuffle(pool, rng('wchal:' + wk)).slice(0, 11), ...shuffle(ca, rng('wchal-ca:' + wk)).slice(0, 4)].map(q => q.id);
+};
+function vCompete() {
+  const t = todayISO(), wk = weekKey(t), wc = U.s.wc[wk], daily = U.s.daily[t], rank = LB.myRank('week'), top = LB.board('week').filter(r => r.p > 0).slice(0, 3);
+  return `${topbar(L('मुक़ाबला', 'Compete'))}
+<main class="page gutter">
+  <section class="card" style="display:flex;flex-direction:column;gap:10px"><div class="sec-head"><h2 class="sec-title" style="font-size:1.05rem">${ic('zap')} ${L('दैनिक चुनौती', 'Daily challenge')}</h2>${daily ? `<span class="tag tag-live">${L('पूरी', 'Done')}</span>` : ''}</div>
+    <p class="small muted" style="margin:0">${daily ? L(`आज ${daily.total} में से ${daily.score} सही। कल नई चुनौती आएगी।`, `Today: ${daily.score} of ${daily.total} right. A new challenge comes tomorrow.`) : L(`नवीनतम करेंट अफेयर्स, आज का दिन और प्रश्न बैंक से 10 प्रश्न · +${PTS.daily} पॉइंट्स`, `10 questions from the latest news, today's day and the bank · +${PTS.daily} points`)}</p>
+    <button class="btn ${daily ? 'btn-outline' : 'btn-cta'}" data-act="start-daily" ${C.baseState !== 'ok' ? 'disabled' : ''}>${daily ? L('फिर से खेलें (बिना बोनस)', 'Play again (no bonus)') : L('शुरू करें', 'Start')}</button></section>
+  <section class="card" style="display:flex;flex-direction:column;gap:10px"><div class="sec-head"><h2 class="sec-title" style="font-size:1.05rem">${ic('swords')} ${L('साप्ताहिक चुनौती', 'Weekly challenge')}</h2><span class="small muted">${esc(fmtWeek(wk))}</span></div>
+    <p class="small muted" style="margin:0">${L(`सभी विद्यार्थियों के लिए एक जैसे 15 प्रश्न, 10 मिनट, परीक्षा मोड। केवल पहला प्रयास गिना जाता है · +${PTS.wchal} पॉइंट्स।`, `The same 15 questions for every student, 10 minutes, exam mode. Only the first attempt counts · +${PTS.wchal} points.`)}</p>
+    ${wc ? `<div class="meta-row"><span>${L('आपका स्कोर', 'Your score')}: <b>${fmtScore(wc.score)}/${wc.max}</b></span><span>${L('समय', 'Time')}: <b>${fmtSecs(wc.sec)}</b></span></div>` : ''}
+    <button class="btn ${wc ? 'btn-outline' : 'btn-cta'}" data-act="start-wchal" ${C.baseState !== 'ok' ? 'disabled' : ''}>${wc ? L('अभ्यास के लिए फिर दें', 'Retake for practice') : L('चुनौती शुरू करें', 'Start the challenge')}</button></section>
+  <section class="sec"><div class="sec-head"><h2 class="sec-title">${ic('clipboard')} ${L('मॉक टेस्ट', 'Mock tests')}</h2><a class="link" href="#mock">${L('सभी', 'All')} ${ic('chev-right')}</a></div>
+    <div class="list">${MOCKS.map(mk => `<button class="row" data-act="mock-intro" data-id="${mk.id}"><span class="row-ic" style="--c:var(--brand)">${ic('clipboard')}</span><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(mockTitle(mk))}</span><span class="row-sub">${mk.mins} ${L('मिनट', 'min')} · +${mk.pos} / −${mk.neg}</span></span>${ic('chev-right', 'chev')}</button>`).join('')}
+    <a class="row" href="#builder"><span class="row-ic" style="--c:var(--ok)">${ic('sliders')}</span><span class="row-main"><span class="row-title" style="font-size:1rem">${L('अपना टेस्ट बनाएँ', 'Build your own test')}</span><span class="row-sub">${L('विषय, अध्याय, कठिनाई, समय और नेगेटिव मार्किंग चुनें', 'Choose subject, chapter, level, time and negative marking')}</span></span>${ic('chev-right', 'chev')}</a></div></section>
+  <section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1.05rem">${ic('users')} ${L('दोस्त को चुनौती दें', 'Challenge a friend')}</h2>
+    <p class="small muted" style="margin:0">${L('10 प्रश्न हल करें और लिंक भेजें — दोस्त वही प्रश्न हल करेगा और दोनों के स्कोर की तुलना होगी। कोई खाता या नंबर साझा नहीं होता।', 'Answer 10 questions and send the link — your friend gets the same questions and you compare scores. No account or phone number is shared.')}</p>
+    <button class="btn btn-outline" data-act="friend-new" ${C.baseState !== 'ok' ? 'disabled' : ''}>${ic('link')} ${L('चुनौती बनाएँ', 'Create a challenge')}</button></section>
+  <section class="sec"><div class="sec-head"><h2 class="sec-title">${ic('trophy')} ${L('लीडरबोर्ड', 'Leaderboard')}</h2><a class="link" href="#leaders">${L('पूरा देखें', 'Open')} ${ic('chev-right')}</a></div>
+    <div class="list">${top.map(r => `<div class="lrow${r.me ? ' me' : ''}"><span class="lrank tnum">${r.rank}</span>${lbAvatar(r)}<span class="lname">${esc(r.n)}</span><span class="lpts tnum">${fmtNum(r.p)}</span></div>`).join('') || `<div class="empty">${L('इस सप्ताह अभी कोई रैंकिंग नहीं', 'No rankings this week yet')}</div>`}
+    <div class="lrow"><span class="row-main small">${L('आपकी रैंक', 'Your rank')}: <b>${rank ? '#' + rank : '–'}</b> · ${fmtNum(U.ptsWeek(wk))} ${L('पॉइंट्स', 'points')}</span></div></div></section>
+</main>
+${bottomNav('compete')}`;
+}
+
+// ── Progress & analytics ──
+const LEVEL_STEP = 100;
+function levelOf(total) { let lvl = 1, need = 0; while (total >= need + LEVEL_STEP * lvl) { need += LEVEL_STEP * lvl; lvl++; } return { lvl, from: need, to: need + LEVEL_STEP * lvl }; }
+const delta = (a, b, unit = '') => { const d = a - b; return `<span class="delta ${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d ? ic(d > 0 ? 'arrow-up' : 'arrow-down') : ''}${d > 0 ? '+' : ''}${d}${unit}</span>`; };
+function vProgress() {
+  const s = U.s, tot = U.totals(), lv = levelOf(s.pts.total), t = todayISO();
+  const wk = weekKey(t), lw = addDays(wk, -7), cw = U.rangeStats(wk, addDays(wk, 6)), pw = U.rangeStats(lw, addDays(lw, 6));
+  const m = M();
+  const subj = SUBJECTS.map(sj => { const x = U.stats(m.bySubj[sj.k] || []); return `<div class="bar-row" style="--c:${sj.c}"><span>${subjName(sj.k)}</span><span class="track" title="${L('कवरेज', 'Coverage')} ${x.cov}%"><i style="width:${x.score}%"></i></span><b>${x.score}%</b></div>`; }).join('');
+  const weak = U.weakTopics(5);
+  const hist = s.hist.slice(0, 12).map(h => { const q = m.byId.get(h.id); if (!q) return ''; return `<div class="hist"><span class="qst ${h.ok ? 'ok' : 'bad'}" role="img" aria-label="${h.ok ? L('सही', 'Right') : L('गलत', 'Wrong')}">${ic(h.ok ? 'check' : 'x')}</span><span class="row-main">${esc(qT(q).slice(0, 90))}${qT(q).length > 90 ? '…' : ''}<span class="row-sub">${relTime(h.t)}${h.ms ? ` · ${Math.round(h.ms / 1000)} ${L('से.', 's')}` : ''} · ${h.m === 'e' ? L('परीक्षा', 'Exam') : h.m === 'r' ? L('दोहराव', 'Revision') : L('अभ्यास', 'Practice')}</span></span></div>`; }).join('');
+  const earned = BADGES.filter(b => s.badges[b.id]).length;
+  const badges = BADGES.map(b => { const d = s.badges[b.id]; return `<li class="bdg${d ? ' got' : ''}" title="${esc(L(b.dhi, b.den))}"><span class="bdg-ic">${ic(d ? b.icon : 'lock')}</span><b>${esc(L(b.hi, b.en))}</b><span>${d ? fmtDate(d) : esc(L(b.dhi, b.den))}</span></li>`; }).join('');
+  const mocks = s.mocks.slice(0, 5);
+  return `${topbar(L('प्रगति', 'Progress'))}
+<main class="page gutter">
+  <section class="card lvl"><div class="lvl-top"><span class="lvl-badge" aria-hidden="true">${lv.lvl}</span><span class="row-main"><b style="font-size:1.1rem">${L(`स्तर ${lv.lvl}`, `Level ${lv.lvl}`)}</b><span class="row-sub">${fmtNum(s.pts.total)} ${L('पॉइंट्स', 'points')} · ${L(`अगले स्तर के लिए ${fmtNum(lv.to - s.pts.total)}`, `${fmtNum(lv.to - s.pts.total)} to next level`)}</span></span><button class="iconbtn" data-act="pts-history" aria-label="${L('पॉइंट्स इतिहास', 'Points history')}">${ic('list')}</button></div>
+    <div class="lvl-bar" role="progressbar" aria-valuemin="${lv.from}" aria-valuemax="${lv.to}" aria-valuenow="${s.pts.total}"><i style="width:${pct(s.pts.total - lv.from, lv.to - lv.from)}%"></i></div></section>
+  <div class="stats">
+    <div class="stat"><b>${tot.attempts}</b><span>${L('कुल उत्तर', 'Answers')}</span></div><div class="stat s-ok"><b>${tot.acc}%</b><span>${L('सटीकता', 'Accuracy')}</span></div><div class="stat"><b>${U.avgSecs() || '–'}</b><span>${L('से./प्रश्न', 's / question')}</span></div>
+    <div class="stat"><b>${U.streak()}</b><span>${L('स्ट्रीक', 'Streak')}</span></div><div class="stat"><b>${s.best || 0}</b><span>${L('सर्वश्रेष्ठ', 'Best streak')}</span></div><div class="stat"><b>${s.mocks.length}</b><span>${L('टेस्ट', 'Tests')}</span></div>
+  </div>
+  <section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('trend')} ${L('यह सप्ताह बनाम पिछला', 'This week vs last')}</h2>
+    <div class="cmp"><span>${L('प्रश्न', 'Questions')}</span><b>${cw.n}</b>${delta(cw.n, pw.n)}<span>${L('सटीकता', 'Accuracy')}</span><b>${cw.acc}%</b>${delta(cw.acc, pw.acc, '%')}<span>${L('पॉइंट्स', 'Points')}</span><b>${fmtNum(cw.pts)}</b>${delta(cw.pts, pw.pts)}</div>
+    ${weekBars()}</section>
+  <section class="card"><h2 class="sec-title" style="font-size:1rem;margin-bottom:12px">${ic('target')} ${L('विषयवार महारत', 'Subject mastery')}</h2><div class="bars">${subj}</div><p class="small muted" style="margin:10px 0 0">${L('हर विषय के कितने प्रश्न पिछली बार सही हुए।', 'Share of each subject\'s questions you got right last time.')}</p></section>
+  <section class="sec"><h2 class="sec-title">${ic('target')} ${L('कमज़ोर विषय', 'Weak topics')}</h2><div class="list">${weak.map(w => `<button class="row" data-act="practice-topic" data-ch="${esc(w.ch)}" data-t="${esc(w.t)}"><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(L(w.t, w.tEn))}</span><span class="row-sub">${esc(chName(w.ch))} · ${w.c + w.w} ${L('प्रयास', 'attempts')}</span></span><span class="pct">${w.acc}%</span>${ic('chev-right', 'chev')}</button>`).join('') || `<div class="empty">${L('अभी कोई कमज़ोर विषय नहीं — शाबाश! (कम से कम 2 प्रयास के बाद दिखते हैं)', 'No weak topics yet — well done! (They appear after at least 2 attempts.)')}</div>`}</div></section>
+  ${mocks.length ? `<section class="sec"><h2 class="sec-title">${ic('clipboard')} ${L('टेस्ट का रुझान', 'Test trend')}</h2><div class="list">${mocks.map(h => `<div class="row"><span class="row-main"><span class="row-title" style="font-size:.95rem">${esc(examTitle(h) || h.title || '')}</span><span class="row-sub">${fmtDate(h.date)} · ${pct(h.c, h.c + h.w)}% ${L('सटीकता', 'accuracy')} · ${fmtSecs(h.timeSec || 0)}</span></span><b class="tnum">${fmtScore(h.score)}/${h.max}</b></div>`).join('')}</div></section>` : ''}
+  <section class="card"><div class="sec-head" style="margin-bottom:12px"><h2 class="sec-title" style="font-size:1rem">${ic('award')} ${L('उपलब्धियाँ', 'Achievements')}</h2><span class="small muted">${earned}/${BADGES.length}</span></div><ul class="bdgs">${badges}</ul>
+    ${earned ? `<button class="btn btn-outline btn-block" style="margin-top:12px" data-act="share-achv">${ic('share')} ${L('उपलब्धि शेयर करें', 'Share achievements')}</button>` : ''}</section>
+  <section class="sec"><div class="sec-head"><h2 class="sec-title">${ic('clock')} ${L('हाल के उत्तर', 'Recent answers')}</h2><span class="small muted">${s.hist.length}</span></div><div class="list">${hist || `<div class="empty">${L('अभी कोई उत्तर नहीं', 'No answers yet')}</div>`}</div></section>
+</main>
+${bottomNav('progress')}`;
+}
+
+// ── First-time onboarding ──
+const WZ = { step: 0 };
+function vWelcome() {
+  const st = WZ.step, dots = `<div class="dots" aria-hidden="true">${[0, 1, 2, 3].map(i => `<i class="${i <= st ? 'on' : ''}"></i>`).join('')}</div>`;
+  const foot = (next, back = true, label = L('आगे', 'Next')) => `<div class="onb-foot">${back ? `<button class="btn btn-grey" data-act="wz-back">${ic('arrow-left')} ${L('पीछे', 'Back')}</button>` : ''}<button class="btn btn-cta" data-act="${next}">${label} ${ic('arrow-right')}</button></div>`;
+  let body;
+  if (st === 0) body = `<svg class="illus" viewBox="0 0 120 120" role="img" aria-label="${L('किताब और टोपी', 'A book and a graduation cap')}"><circle cx="60" cy="60" r="56" fill="var(--sky-soft)"/><path d="M28 78l32-12 32 12v8l-32-12-32 12z" fill="var(--navy)"/><path d="M60 30 24 46l36 16 36-16z" fill="var(--navy)"/><path d="M40 54v14c0 6 9 10 20 10s20-4 20-10V54" fill="none" stroke="var(--sky)" stroke-width="5"/><circle cx="92" cy="50" r="4" fill="var(--gold)"/></svg>
+    <h1>${L('MY QUIZ में आपका स्वागत है', 'Welcome to MY QUIZ')}</h1><p class="lead">${L('सीखें → अभ्यास करें → समझें → दोहराएँ → मुक़ाबला करें → बेहतर बनें। पहले भाषा चुनें।', 'Learn → practise → understand → revise → compete → improve. First, choose your language.')}</p>
+    <div class="choices">${[['hi', 'हिंदी', 'सरल हिंदी में'], ['en', 'English', 'In simple English']].map(([v, l, d]) => `<button class="choice" data-act="set-lang" data-v="${v}" aria-pressed="${LANG === v}" lang="${v}">${l}<span>${d}</span></button>`).join('')}</div>
+    <div class="field"><label for="wz-name">${L('आपका नाम (वैकल्पिक)', 'Your name (optional)')}</label><input class="input" id="wz-name" data-bind="onb.name" value="${esc(onb.name || U.s.name)}" maxlength="40" autocomplete="given-name" placeholder="${L('जैसे: राहुल', 'e.g. Rahul')}"></div>
+    <div class="onb-foot"><button class="btn btn-grey" data-act="wz-finish">${L('अभी छोड़ें', 'Skip for now')}</button><button class="btn btn-cta" data-act="wz-next">${L('आगे', 'Next')} ${ic('arrow-right')}</button></div>`;
+  else if (st === 1) body = `<h1>${L('आप किस परीक्षा की तैयारी कर रहे हैं?', 'Which exam are you preparing for?')}</h1><p class="lead">${L('हम उसी के अनुसार अध्याय और टेस्ट सुझाएँगे। बाद में बदल सकते हैं।', 'We\'ll suggest chapters and tests for it. You can change it later.')}</p>
+    <div class="choices">${EXAMS.map(e => `<button class="choice" data-act="wz-exam" data-v="${e.id}" aria-pressed="${(onb.exam || U.s.exam) === e.id}">${esc(L(e.hi, e.en))}<span>${esc(L(e.dhi, e.den))}</span></button>`).join('')}</div>${foot('wz-next')}`;
+  else if (st === 2) body = `<h1>${L('रोज़ कितना पढ़ेंगे?', 'How much will you study each day?')}</h1><p class="lead">${L('छोटा लक्ष्य रोज़ पूरा करना बड़े लक्ष्य से बेहतर है।', 'A small goal met every day beats a big one.')}</p>
+    <div class="choices one">${[[10, '~5 मिनट · आराम से', '~5 min · relaxed'], [20, '~10 मिनट · नियमित', '~10 min · regular'], [30, '~15 मिनट · गंभीर', '~15 min · serious']].map(([n, hi, en]) => `<button class="choice" data-act="wz-goal" data-v="${n}" aria-pressed="${(onb.goal || U.s.goal) === n}">${L(`${n} प्रश्न रोज़`, `${n} questions a day`)}<span>${L(hi, en)}</span></button>`).join('')}</div>${foot('wz-next')}`;
+  else body = `<h1>${L('5 प्रश्नों से अपना स्तर जानें', 'Find your level with 5 questions')}</h1><p class="lead">${L('अलग-अलग विषयों से 5 प्रश्न। इससे सुझाव आपके स्तर के अनुसार होंगे। कोई पॉइंट्स नहीं कटेंगे।', 'Five questions from different subjects, so suggestions match your level. Nothing is deducted.')}</p>
+    <ul class="facts"><li>${ic('check')}<span>${L('लगभग 2 मिनट', 'About 2 minutes')}</span></li><li>${ic('check')}<span>${L('हर उत्तर पर व्याख्या', 'An explanation after every answer')}</span></li><li>${ic('check')}<span>${L('चाहें तो छोड़ दें', 'Skip it if you like')}</span></li></ul>
+    <div class="onb-foot"><button class="btn btn-grey" data-act="wz-finish">${L('अभी छोड़ें', 'Skip for now')}</button><button class="btn btn-cta" data-act="start-assess" ${C.baseState !== 'ok' ? 'disabled' : ''}>${ic('play')} ${L('शुरू करें', 'Start')}</button></div>`;
+  return `<main class="onb-page gutter">${dots}${body}</main>`;
+}
+function assessQuestions() {
+  const m = M(), out = [];
+  for (const [s, d] of [['history', 1], ['geography', 2], ['polity', 1], ['science', 1], ['misc', 2]]) {
+    const pool = (m.bySubj[s] || []).filter(q => (q.d || 1) >= d);
+    const q = shuffle(pool.length ? pool : m.bySubj[s] || [], rng('assess:' + s))[0];
+    if (q) out.push(q);
+  }
+  return out;
+}
+const levelName = sc => (sc == null ? '' : sc >= 80 ? L('उन्नत', 'Advanced') : sc >= 40 ? L('मध्यम', 'Intermediate') : L('शुरुआती', 'Beginner'));
+
+// ───────────────────────────── v3: test builder, friend challenges, notes, AI tutor ─────────────────────────────
+const MARKING = [[1, 0, '+1 / 0'], [1, 0.25, '+1 / −0.25'], [1, 1 / 3, '+1 / −⅓'], [2, 0.5, '+2 / −0.5']];
+const BLD = { s: '', ch: '', d: 0, n: 10, mins: 10, mk: 1 };
+function builderPool() {
+  const m = M();
+  let list = BLD.ch ? m.byCh[BLD.ch] || [] : BLD.s ? m.bySubj[BLD.s] || [] : m.all;
+  if (BLD.d) list = list.filter(q => (q.d || 1) === BLD.d);
+  return list;
+}
+function vBuilder() {
+  const m = M(), pool = builderPool(), mk = MARKING[BLD.mk] || MARKING[0];
+  const chs = BLD.s ? chaptersOf(BLD.s) : [];
+  const chip = (act, v, cur, label) => `<button class="chip" data-act="${act}" data-v="${esc(v)}" aria-pressed="${String(cur) === String(v)}">${label}</button>`;
+  return `${appbar(`${ic('sliders')} ${L('अपना टेस्ट बनाएँ', 'Build your own test')}`, { back: 'compete' })}
+<main class="page gutter">
+  <div class="note">${ic('info')}<div>${L('परीक्षा मोड: उत्तर अंत में दिखेंगे, समय-सीमा और नेगेटिव मार्किंग लागू होगी।', 'Exam mode: answers are shown only at the end, with a time limit and negative marking.')}</div></div>
+  <section class="card" style="display:flex;flex-direction:column;gap:14px">
+    <div class="field"><span class="lbl">${L('विषय', 'Subject')}</span><div class="chips wrap">${chip('bld-s', '', BLD.s, L('सभी', 'All'))}${SUBJECTS.map(sj => chip('bld-s', sj.k, BLD.s, esc(subjName(sj.k)))).join('')}</div></div>
+    ${chs.length ? `<div class="field"><label for="bld-ch">${L('अध्याय', 'Chapter')}</label><select class="select" id="bld-ch" data-change="bld-ch"><option value="">${L('सभी अध्याय', 'All chapters')}</option>${chs.map(c => `<option value="${esc(c.id)}" ${BLD.ch === c.id ? 'selected' : ''}>${esc(L(c.hi, c.en))} (${(m.byCh[c.id] || []).length})</option>`).join('')}</select></div>` : ''}
+    <div class="field"><span class="lbl">${L('कठिनाई', 'Difficulty')}</span><div class="chips wrap">${[0, 1, 2, 3].map(d => chip('bld-d', d, BLD.d, d ? esc(diffLabel(d)) : L('मिश्रित', 'Mixed'))).join('')}</div></div>
+    <div class="field"><span class="lbl">${L('प्रश्न', 'Questions')}</span><div class="chips">${[5, 10, 20, 30].map(n => chip('bld-n', n, BLD.n, String(n))).join('')}</div></div>
+    <div class="field"><span class="lbl">${L('समय', 'Time')}</span><div class="chips">${[5, 10, 15, 20, 30].map(n => chip('bld-mins', n, BLD.mins, `${n} ${L('मिनट', 'min')}`)).join('')}</div></div>
+    <div class="field"><span class="lbl">${L('अंक योजना (सही / गलत)', 'Marking (right / wrong)')}</span><div class="chips wrap">${MARKING.map((x, i) => chip('bld-mk', i, BLD.mk, x[2])).join('')}</div><span class="small muted">${L('SSC: +2/−0.5 · UPSC: +1/−⅓ के बराबर', 'SSC: +2/−0.5 · UPSC: equivalent to +1/−⅓')}</span></div>
+    <p class="small" style="margin:0">${L(`उपलब्ध प्रश्न: ${pool.length}`, `Questions available: ${pool.length}`)}${pool.length < BLD.n ? ` — ${L(`टेस्ट में ${pool.length} प्रश्न होंगे`, `the test will have ${pool.length}`)}` : ''}</p>
+    <button class="btn btn-cta" data-act="bld-start" ${pool.length >= 3 ? '' : 'disabled'}>${ic('play')} ${L('टेस्ट शुरू करें', 'Start test')} · ${Math.min(BLD.n, pool.length)} ${L('प्रश्न', 'Qs')} · ${BLD.mins} ${L('मिनट', 'min')} · ${mk[2]}</button>
+  </section>
+</main>
+${bottomNav('compete')}`;
+}
+
+// Friend challenges travel as a short code (also inside a link where the host allows it): same questions, compare scores.
+const b64e = o => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+function b64d(c) { try { const s = String(c).trim().replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(decodeURIComponent(escape(atob(s + '==='.slice((s.length + 3) % 4))))); } catch { return null; } }
+function readChallenge(code) {
+  const x = b64d(code);
+  if (!x || x.v !== 1 || !Array.isArray(x.ids)) return null;
+  const ids = x.ids.map(String).filter(id => M().byId.has(id)).slice(0, 30);
+  return ids.length >= 3 ? { n: String(x.n || '').slice(0, 24), ids, sc: Number(x.sc) || 0, max: Number(x.max) || ids.length, sec: Number(x.sec) || 0 } : null;
+}
+function challengeText(code, R) {
+  const link = P.mode === 'standalone' && /^https?:/.test(location.protocol) ? `${location.origin}${location.pathname}#challenge/${code}` : '';
+  return L(`🧠 MY QUIZ चुनौती! मैंने ${R.n} में से ${R.c} सही किए (${fmtScore(R.score)}/${R.max})। क्या आप मुझे हरा सकते हैं?\n${link ? link + '\n' : ''}ऐप में "मुक़ाबला → चुनौती कोड डालें" में यह कोड पेस्ट करें:\n${code}`,
+    `🧠 MY QUIZ challenge! I got ${R.c} of ${R.n} right (${fmtScore(R.score)}/${R.max}). Can you beat me?\n${link ? link + '\n' : ''}In the app, open "Compete → Enter a challenge code" and paste:\n${code}`);
+}
+function vChallenge() {
+  const x = routeArg ? readChallenge(routeArg) : null;
+  return `${appbar(`${ic('users')} ${L('दोस्त की चुनौती', 'Friend challenge')}`, { back: 'compete' })}
+<main class="page gutter">
+  ${x ? `<section class="card next"><span class="k">${L('चुनौती', 'Challenge')}</span><h3>${esc(x.n || L('आपके दोस्त', 'Your friend'))} ${L('ने आपको चुनौती दी है', 'challenged you')}</h3>
+    <p>${L(`${x.ids.length} प्रश्न · उनका स्कोर ${fmtScore(x.sc)}/${x.max}${x.sec ? ` · ${fmtSecs(x.sec)}` : ''}`, `${x.ids.length} questions · their score ${fmtScore(x.sc)}/${x.max}${x.sec ? ` · ${fmtSecs(x.sec)}` : ''}`)}</p>
+    <div class="ringbox"><span class="lvl-badge">${ic('swords')}</span></div>
+    <button class="btn btn-cta btn-block" data-act="friend-accept" data-code="${esc(routeArg)}">${ic('play')} ${L('चुनौती स्वीकार करें', 'Accept the challenge')}</button></section>
+    <p class="small muted" style="margin:0">${L('परीक्षा मोड · 5 मिनट · कोई नेगेटिव मार्किंग नहीं। उत्तर अंत में दिखेंगे।', 'Exam mode · 5 minutes · no negative marking. Answers are shown at the end.')}</p>`
+    : `<section class="card" style="display:flex;flex-direction:column;gap:12px"><h2 class="sec-title" style="font-size:1.05rem">${ic('link')} ${L('चुनौती कोड डालें', 'Enter a challenge code')}</h2>
+    ${routeArg ? `<div class="note note-warn">${ic('alert')}<div>${L('यह कोड सही नहीं है या इसके प्रश्न इस ऐप में नहीं हैं।', 'This code is not valid, or its questions are not in this app.')}</div></div>` : ''}
+    <form data-form="challenge-code" style="display:flex;flex-direction:column;gap:10px"><textarea class="textarea" id="ch-code" rows="3" placeholder="${L('दोस्त का भेजा कोड यहाँ पेस्ट करें', 'Paste the code your friend sent')}" style="min-height:80px"></textarea><button class="btn btn-cta" type="submit">${ic('arrow-right')} ${L('चुनौती खोलें', 'Open challenge')}</button></form></section>`}
+</main>
+${bottomNav('compete')}`;
+}
+
+// Printable chapter notes (verified content only) — "Save as PDF" from the print dialog.
+function vNotes() {
+  const id = routeArg, list = (M().byCh[id] || []).slice().sort((a, b) => (a.d || 1) - (b.d || 1));
+  if (!list.length) return redirect('learn');
+  const items = list.map((q, i) => { const o = qO(q), why = qWhy(q); return `<article class="review-item"><b>${i + 1}. ${esc(qT(q))}</b><span class="ans">${L('उत्तर', 'Answer')}: <span class="ans-ok">${esc(o[q.a])}</span></span><span class="small">${esc(qE(q) || '')}</span>${qCtx(q) ? `<span class="small muted">${esc(qCtx(q))}</span>` : ''}${why.some(Boolean) ? `<ul class="small" style="margin:0;padding-left:1.2em">${o.map((x, j) => (j !== q.a && why[j] ? `<li>${esc(x)}: ${esc(why[j])}</li>` : '')).join('')}</ul>` : ''}</article>`; }).join('');
+  return `${appbar(`${ic('printer')} ${L('नोट्स', 'Notes')}`, { back: 'chapter/' + id })}
+<main class="page gutter">
+  <section class="card article"><h1>${esc(chName(id))}</h1><div class="art-meta">${esc(subjName((CHM[id] || {}).s || ''))} · ${list.length} ${L('प्रश्न', 'questions')} · MY QUIZ · ${fmtDate(todayISO())}</div>
+    <div class="art-tools no-print"><button class="btn btn-sm btn-cta" data-act="print">${ic('printer')} ${L('प्रिंट / PDF सहेजें', 'Print / save as PDF')}</button><button class="btn btn-sm btn-outline" data-act="notes-copy" data-ch="${esc(id)}">${ic('copy')} ${L('टेक्स्ट कॉपी करें', 'Copy text')}</button></div></section>
+  <div class="list">${items}</div>
+</main>`;
+}
+function notesText(id) {
+  return [`${chName(id)} — MY QUIZ`, ''].concat((M().byCh[id] || []).map((q, i) => { const o = qO(q); return `${i + 1}. ${qT(q)}\n   ${L('उत्तर', 'Answer')}: ${o[q.a]}\n   ${qE(q) || ''}`; })).join('\n');
+}
+
+// AI tutor: follow-up questions about one question, grounded in its verified explanation.
+const TUTOR = { q: null, msgs: [], busy: false, ctl: null };
+function tutorContext(q) {
+  const o = qO(q), why = qWhy(q);
+  return [`${L('प्रश्न', 'Question')}: ${qT(q)}`, `${L('विकल्प', 'Options')}: ${o.map((x, i) => `${LETTERS[i]}) ${x}`).join('  ')}`, `${L('सही उत्तर', 'Correct answer')}: ${LETTERS[q.a]}) ${o[q.a]}`,
+    `${L('सत्यापित व्याख्या', 'Verified explanation')}: ${qE(q) || '—'}`, qCtx(q) ? `${L('पृष्ठभूमि', 'Background')}: ${qCtx(q)}` : '',
+    why.some(Boolean) ? `${L('गलत विकल्प क्यों गलत हैं', 'Why the wrong options are wrong')}: ${o.map((x, i) => (i !== q.a && why[i] ? `${x} — ${why[i]}` : '')).filter(Boolean).join(' | ')}` : ''].filter(Boolean).join('\n');
+}
+function tutorPrompt(q, ask) {
+  const hist = TUTOR.msgs.slice(-6).map(m => `${m.me ? L('विद्यार्थी', 'Student') : L('ट्यूटर', 'Tutor')}: ${m.text}`).join('\n');
+  return LANG === 'en'
+    ? `You are a patient tutor for Indian competitive-exam students. Answer in simple English, at most 120 words, short sentences, no Markdown.
+Use only the verified material below and well-established textbook facts. If you are not sure of a fact, say so plainly instead of guessing. Never invent dates, numbers or names.
+
+Verified material:
+${tutorContext(q)}
+
+Conversation so far:
+${hist || '—'}
+
+Student: ${ask}
+Tutor:`
+    : `आप भारत की प्रतियोगी परीक्षाओं के विद्यार्थियों के धैर्यवान शिक्षक हैं। सरल हिंदी में, अधिकतम 120 शब्दों में, छोटे वाक्यों में उत्तर दें। Markdown का प्रयोग न करें।
+केवल नीचे दी गई सत्यापित सामग्री और पाठ्यपुस्तकों के स्थापित तथ्यों का प्रयोग करें। किसी तथ्य पर पक्का भरोसा न हो तो साफ़ कहें, अनुमान न लगाएँ। तारीख़, संख्या या नाम कभी न गढ़ें।
+
+सत्यापित सामग्री:
+${tutorContext(q)}
+
+अब तक की बातचीत:
+${hist || '—'}
+
+विद्यार्थी: ${ask}
+शिक्षक:`;
+}
+const TUTOR_QUICK = [['आसान भाषा में समझाएँ', 'Explain it simply'], ['रोज़मर्रा का एक उदाहरण दें', 'Give a real-life example'], ['याद रखने की ट्रिक बताएँ', 'Give me a memory trick'], ['इससे जुड़े विषय कौन-से हैं?', 'Which related topics should I study?']];
+function tutorHtml() {
+  const q = TUTOR.q;
+  return `${sheetHead(`${ic('message')} ${L('AI ट्यूटर', 'AI tutor')}`)}
+  <p class="small muted" style="margin:0">${esc(qT(q))}</p>
+  <div class="chat" id="tutor-chat">${TUTOR.msgs.map(m => `<div class="msg ${m.me ? 'me' : 'ai'}">${esc(m.text || (TUTOR.busy ? L('सोच रहा है…', 'Thinking…') : ''))}${m.err ? `<br><span style="color:var(--bad)">${esc(m.err)}</span>` : ''}</div>`).join('') || `<div class="msg ai">${L('इस प्रश्न के बारे में कुछ भी पूछें — मैं सत्यापित व्याख्या के आधार पर समझाऊँगा।', 'Ask anything about this question — I\'ll explain using the verified explanation.')}</div>`}</div>
+  <div class="chips">${TUTOR_QUICK.map(([hi, en]) => `<button class="chip" data-act="tutor-ask" data-v="${esc(L(hi, en))}" ${TUTOR.busy ? 'disabled' : ''}>${esc(L(hi, en))}</button>`).join('')}</div>
+  <form class="chat-form" data-form="tutor"><input class="input" id="tutor-in" maxlength="300" placeholder="${L('अपना प्रश्न लिखें', 'Type your question')}" autocomplete="off" ${TUTOR.busy ? 'disabled' : ''}><button class="btn btn-cta" type="submit" ${TUTOR.busy ? 'disabled' : ''} aria-label="${L('भेजें', 'Send')}">${ic('send')}</button></form>
+  <p class="small muted" style="margin:0">${ic('info')} ${L('AI के उत्तर गलत भी हो सकते हैं — मुख्य तथ्य ऊपर दी गई सत्यापित व्याख्या से मिलाएँ।', 'AI answers can be wrong — check key facts against the verified explanation.')}</p>`;
+}
+function openTutor(q) { if (TUTOR.q !== q) { TUTOR.q = q; TUTOR.msgs = []; } openSheet(tutorHtml(), { label: L('AI ट्यूटर', 'AI tutor'), onClose: () => { if (TUTOR.ctl) TUTOR.ctl.abort(); } }); }
+async function tutorAsk(text) {
+  const q = TUTOR.q, ask = String(text || '').trim().slice(0, 300);
+  if (!q || !ask || TUTOR.busy) return;
+  TUTOR.msgs.push({ me: true, text: ask });
+  const reply = { me: false, text: '' };
+  TUTOR.msgs.push(reply);
+  TUTOR.busy = true; TUTOR.ctl = new AbortController();
+  const redraw = () => { if (sheetOpen() && $('#tutor-chat')) { $('#sheet-root .sheet').innerHTML = '<div class="sheet-grip"></div>' + tutorHtml(); const c = $('#tutor-chat'); if (c) c.scrollTop = c.scrollHeight; } };
+  redraw();
+  try { await AI.text(tutorPrompt(q, ask), { signal: TUTOR.ctl.signal, onText: ({ text }) => { reply.text = text; const els = $$('#tutor-chat .msg.ai'); if (els.length) els[els.length - 1].textContent = text; } }); }
+  catch (e) { reply.err = AI.msg(e); if (e && e.text) reply.text = e.text; }
+  TUTOR.busy = false; TUTOR.ctl = null;
+  redraw();
+  const inp = $('#tutor-in'); if (inp) inp.focus({ preventScroll: true });
+}
+// AI revision notes for a chapter, summarised only from its verified questions.
+async function aiNotes(id) {
+  const list = (M().byCh[id] || []).slice(0, 40);
+  const src = list.map(q => `• ${qT(q)} → ${qO(q)[q.a]}. ${qE(q) || ''} ${qCtx(q) || ''}`).join('\n');
+  openSheet(`${sheetHead(`${ic('sparkles')} ${L('AI रिविज़न नोट्स', 'AI revision notes')}`)}<p class="small muted" style="margin:0">${esc(chName(id))} · ${L('केवल इस अध्याय के सत्यापित प्रश्नों से बने', 'Made only from this chapter\'s verified questions')}</p><div class="ai-box" id="ai-notes" style="white-space:pre-wrap">${L('नोट्स बन रहे हैं…', 'Writing notes…')}</div><div class="btnrow"><button class="btn btn-sm btn-outline" data-act="notes-copy-ai">${ic('copy')} ${L('कॉपी करें', 'Copy')}</button><a class="btn btn-sm btn-outline" href="#notes/${esc(id)}">${ic('printer')} ${L('पूरे नोट्स (प्रिंट)', 'Full notes (print)')}</a></div>`, { label: L('AI रिविज़न नोट्स', 'AI revision notes') });
+  const prompt = LANG === 'en'
+    ? `Write short exam revision notes in simple English from ONLY the verified facts below. 8–12 bullet points starting with "• ", one fact each, grouped logically. No Markdown headings, no facts that are not below.\n\nVerified facts (${chName(id)}):\n${src}`
+    : `नीचे दिए केवल सत्यापित तथ्यों से सरल हिंदी में परीक्षा के लिए छोटे रिविज़न नोट्स लिखें। 8–12 बिंदु, हर बिंदु "• " से शुरू, एक बिंदु में एक तथ्य, विषय के अनुसार क्रम में। Markdown शीर्षक नहीं, और नीचे न दिया कोई तथ्य नहीं।\n\nसत्यापित तथ्य (${chName(id)}):\n${src}`;
+  try { await AI.text(prompt, { onText: ({ text }) => { const b = $('#ai-notes'); if (b) b.textContent = text; } }); }
+  catch (e) { const b = $('#ai-notes'); if (b) b.textContent = AI.msg(e); }
+}
+
+// ───────────────────────────── v3: current affairs (articles) and Aaj ka Din (daily session) ─────────────────────────────
+let caTab = 'today', caQuery = '';
+const CA_TABS = [['today', 'आज', 'Today'], ['week', 'सप्ताह', 'Week'], ['month', 'महीना', 'Month'], ['archive', 'संग्रह', 'Archive'], ['saved', 'सहेजे', 'Saved']];
+const nX = (n, k) => tx(n, k);                                           // article section in the current language
+const nList = (n, k) => (LANG === 'en' && n.en && Array.isArray(n.en[k]) && n.en[k].length ? n.en[k] : Array.isArray(n[k]) ? n[k] : []);
+function caMatch(n) {
+  if (caCat && n.cat !== caCat) return false;
+  const t = caQuery.trim().toLowerCase();
+  if (!t) return true;
+  return [n.title, n.summary, n.en && n.en.title, n.en && n.en.summary, ...(n.facts || [])].join(' ').toLowerCase().includes(t);
+}
+function caRange(tab) {
+  const m = M(), t = todayISO(), wk = weekKey(t), mo = monthKey(t);
+  if (tab === 'today') return m.news.filter(n => n.date === t);
+  if (tab === 'week') return m.news.filter(n => n.date >= wk && n.date <= t);
+  if (tab === 'month') return m.news.filter(n => n.date.startsWith(mo));
+  if (tab === 'saved') return U.s.bm.n.map(id => m.newsById.get(id)).filter(Boolean);
+  return m.news;
+}
+const caQs = list => { const ids = new Set(list.map(n => n.id)); return (M().bySubj.ca || []).filter(q => ids.has(q.n)); };
+function caFeedHtml() {
+  const m = M(), tab = CA_TABS.some(x => x[0] === caTab) ? caTab : 'today';
+  const list = caRange(tab).filter(caMatch), latest = m.news[0];
+  const groups = {};
+  for (const n of list) { const k = tab === 'archive' ? n.date.slice(0, 7) : n.date; (groups[k] = groups[k] || []).push(n); }
+  const feed = Object.keys(groups).sort().reverse().map(k => `<h3 class="dgroup">${tab === 'archive' ? `${fmtMonth(k)} · ${groups[k].length}` : `${fmtDate(k)} · ${weekday(k)}`}</h3>${groups[k].map(newsCard).join('')}`).join('');
+  if (feed) return feed;
+  return tab === 'today' && !caQuery && !caCat
+    ? `<div class="card">${emptyState('newspaper', L('आज की ख़बरें अभी प्रकाशित नहीं हुईं', 'Today\'s news is not published yet'), latest ? `${L('नवीनतम ख़बरें', 'Latest stories')}: ${fmtDate(latest.date, false)}` : '')}</div>${m.news.slice(0, 3).map(newsCard).join('')}`
+    : tab === 'saved' && !caQuery && !caCat ? `<div class="card">${emptyState('bookmark', L('कोई ख़बर सहेजी नहीं गई', 'No saved stories'), L('किसी ख़बर में "सहेजें" दबाएँ।', 'Tap "Save" on a story.'))}</div>`
+      : `<div class="card">${emptyState('search', L('कोई ख़बर नहीं मिली', 'No stories found'), L('खोज, श्रेणी या अवधि बदलकर देखें।', 'Try another search, category or period.'))}</div>`;
+}
+function vCA() {
+  const m = M(), t = todayISO(), tab = CA_TABS.some(x => x[0] === caTab) ? caTab : 'today';
+  const list = caRange(tab).filter(caMatch), latest = m.news[0], qs = caQs(list);
+  const revise = (tab === 'week' || tab === 'month') && list.length ? `<section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('rotate')} ${tab === 'week' ? L('साप्ताहिक रिवीज़न', 'Weekly revision') : L('मासिक करेंट अफेयर्स', 'Monthly current affairs')}</h2>
+    <p class="small muted" style="margin:0">${L(`${list.length} ख़बरें · ${qs.length} प्रश्न`, `${list.length} stories · ${qs.length} questions`)}</p>
+    <div class="grid2"><button class="btn btn-cta" data-act="ca-range-quiz" data-v="${tab}" ${qs.length ? '' : 'disabled'}>${ic('zap')} ${L('क्विज', 'Quiz')}</button><a class="btn btn-outline" href="#ca-notes/${tab}">${ic('printer')} ${L('PDF नोट्स', 'PDF notes')}</a></div></section>` : '';
+  return `${appbar(`${ic('newspaper')} ${L('करेंट अफेयर्स', 'Current affairs')}`, { back: 'learn', right: `<span class="pill pill-green">${L('दैनिक अपडेट', 'Daily update')}</span>` })}
+<main class="page gutter">
+  <div class="datebar">${ic('calendar')} <span class="tnum">${fmtDate(t)}</span></div>
+  <p class="small muted" style="margin:-10px 0 0;text-align:center">${latest ? L(`आख़िरी अपडेट: ${fmtDate(latest.date)}`, `Last updated: ${fmtDate(latest.date)}`) : ''}</p>
+  <div class="seg" style="grid-template-columns:repeat(5,minmax(0,1fr))" role="group" aria-label="${L('अवधि', 'Period')}">${CA_TABS.map(([v, hi, en]) => `<button data-act="ca-tab" data-v="${v}" aria-pressed="${tab === v}">${L(hi, en)}</button>`).join('')}</div>
+  <div class="search">${ic('search')}<input id="ca-search" type="search" value="${esc(caQuery)}" placeholder="${L('ख़बरों में खोजें', 'Search the news')}" autocomplete="off" aria-label="${L('ख़बरों में खोजें', 'Search the news')}"></div>
+  <div class="chips" role="group" aria-label="${L('श्रेणी चुनें', 'Choose a category')}"><button class="chip" data-act="ca-cat" data-cat="" aria-pressed="${!caCat}">${L('सभी', 'All')}</button>${uniq(m.news.map(n => n.cat)).map(c => `<button class="chip" data-act="ca-cat" data-cat="${esc(c)}" aria-pressed="${caCat === c}">${esc(catLabel(c))}</button>`).join('')}</div>
+  ${(m.bySubj.ca || []).length ? `<button class="ca-cta" data-act="start-ca">${ic('zap')}<span class="row-main"><b>${L('करेंट अफेयर्स क्विज', 'Current affairs quiz')}</b><span>${L('नवीनतम ख़बरों से 10 प्रश्न', '10 questions from the latest news')}</span></span>${ic('arrow-right')}</button>` : ''}
+  ${C.baseState === 'error' ? dataErrorNote() : ''}
+  ${revise}
+  <div id="ca-feed" style="display:flex;flex-direction:column;gap:12px">${C.baseState === 'loading' ? skeletonCards(3) : caFeedHtml()}</div>
+</main>
+${bottomNav('ca')}`;
+}
+function openNews(id) { go('news/' + id); }
+// Listen to an article: the claude.ai voice when offered, else the browser's speech engine (Hindi or English).
+const TTS = { on: false };
+const ttsAvailable = () => !!(P.tts || ('speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function'));
+function stopSpeak() {
+  try { if (P.tts && P.tts.stop) P.tts.stop(); } catch { /* ignore */ }
+  try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch { /* ignore */ }
+  if (TTS.on) { TTS.on = false; const b = $('[data-act="tts"]'); if (b) b.innerHTML = `${ic('volume')} ${L('सुनें', 'Listen')}`; }
+}
+function speak(text) {
+  stopSpeak();
+  const done = () => { TTS.on = false; const b = $('[data-act="tts"]'); if (b) b.innerHTML = `${ic('volume')} ${L('सुनें', 'Listen')}`; };
+  TTS.on = true;
+  const b = $('[data-act="tts"]'); if (b) b.innerHTML = `${ic('stop')} ${L('रोकें', 'Stop')}`;
+  if (P.tts) { Promise.resolve().then(() => P.tts.speak(text.slice(0, 2000), { language: LANG === 'en' ? 'en' : 'hi' })).catch(() => {}).finally(done); return; }
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = LANG === 'en' ? 'en-IN' : 'hi-IN'; u.rate = 0.95;
+    const v = window.speechSynthesis.getVoices().find(x => (x.lang || '').toLowerCase().startsWith(LANG === 'en' ? 'en' : 'hi'));
+    if (v) u.voice = v;
+    u.onend = done; u.onerror = done;
+    window.speechSynthesis.speak(u);
+  } catch { done(); toast(L('इस डिवाइस पर सुनने की सुविधा उपलब्ध नहीं है।', 'Listening is not available on this device.'), 'info'); }
+}
+const articleText = n => [nT(n), nS(n), nX(n, 'details'), nX(n, 'why'), ...nF(n)].filter(Boolean).join('। ');
+function vNews() {
+  const m = M(), n = m.newsById.get(routeArg);
+  if (!n) return C.baseState === 'loading' ? `${appbar(L('करेंट अफेयर्स', 'Current affairs'), { back: 'ca' })}<main class="page gutter">${skeletonCards(2)}</main>` : redirect('ca');
+  const c = catOf(n.cat), qs = (m.bySubj.ca || []).filter(q => q.n === n.id), bm = U.isBm('n', n.id);
+  const src = n.source || {}, url = safeUrl(src.url), facts = nF(n), schemes = nList(n, 'schemes'), orgs = nList(n, 'orgs');
+  const related = m.news.filter(x => x.id !== n.id && x.cat === n.cat).slice(0, 2);
+  const sec = (icon, hi, en, body) => (body ? `<section class="art-sec"><h2>${ic(icon)} ${L(hi, en)}</h2>${body}</section>` : '');
+  const ul = arr => (arr.length ? `<ul class="facts">${arr.map(f => `<li>${ic('check')}<span>${esc(f)}</span></li>`).join('')}</ul>` : '');
+  return `${appbar(`${ic('newspaper')} ${L('करेंट अफेयर्स', 'Current affairs')}`, { back: 'ca' })}
+<main class="page gutter">
+  <article class="card article">
+    <div class="art-meta"><span class="badge" style="--c2:${c.c2}">${esc(catLabel(n.cat))}</span><span>${fmtDate(n.date)}${n.time ? ' · ' + esc(n.time) : ''} · ${weekday(n.date)}</span></div>
+    <h1>${esc(nT(n))}</h1>
+    <div class="art-meta">${nSrc(n) ? `<span>${L('स्रोत', 'Source')}: ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(nSrc(n))} ${ic('external')}</a>` : esc(nSrc(n))}</span>` : ''}</div>
+    <div class="art-tools no-print">${ttsAvailable() ? `<button class="btn btn-sm btn-outline" data-act="tts" data-id="${esc(n.id)}">${ic('volume')} ${L('सुनें', 'Listen')}</button>` : ''}<button class="btn btn-sm btn-outline" data-act="bm-n" data-id="${esc(n.id)}" aria-pressed="${bm}">${ic('bookmark', bm ? 'fill' : '')} ${bm ? L('सहेजा गया', 'Saved') : L('सहेजें', 'Save')}</button><button class="btn btn-sm btn-outline" data-act="share-news" data-id="${esc(n.id)}">${ic('share')} ${L('शेयर', 'Share')}</button><a class="btn btn-sm btn-outline" href="#ca-notes/${esc(n.id)}">${ic('printer')} PDF</a></div>
+    ${sec('list', 'सारांश', 'Summary', `<p>${esc(nS(n))}</p>`)}
+    ${sec('book-open', 'विस्तार से', 'In detail', nX(n, 'details') ? `<p>${esc(nX(n, 'details'))}</p>` : '')}
+    ${sec('target', 'यह क्यों महत्वपूर्ण है', 'Why it matters', nX(n, 'why') ? `<p>${esc(nX(n, 'why'))}</p>` : '')}
+    ${sec('clock', 'पृष्ठभूमि', 'Background', nX(n, 'bg') ? `<p>${esc(nX(n, 'bg'))}</p>` : '')}
+    ${sec('star', 'परीक्षा के लिए मुख्य तथ्य', 'Key facts for exams', ul(facts))}
+    ${sec('clipboard', 'संबंधित योजनाएँ और नीतियाँ', 'Related schemes and policies', ul(schemes))}
+    ${sec('landmark', 'संबंधित संस्थाएँ', 'Organisations and institutions', ul(orgs))}
+  </article>
+  ${qs.length ? `<button class="ca-cta" data-act="news-quiz" data-id="${esc(n.id)}">${ic('help')}<span class="row-main"><b>${L(`इस ख़बर से ${qs.length} अभ्यास प्रश्न`, `${qs.length} practice questions from this story`)}</b><span>${L('हर उत्तर पर व्याख्या', 'An explanation after every answer')}</span></span>${ic('arrow-right')}</button>` : ''}
+  ${related.length ? `<section class="sec"><h2 class="sec-title">${ic('newspaper')} ${L('इसी श्रेणी की और ख़बरें', 'More in this category')}</h2>${related.map(newsCard).join('')}</section>` : ''}
+</main>
+${bottomNav('ca')}`;
+}
+// Printable notes for a story, this week or this month.
+function vCaNotes() {
+  const m = M(), arg = routeArg;
+  const list = arg === 'week' || arg === 'month' ? caRange(arg) : [m.newsById.get(arg)].filter(Boolean);
+  if (!list.length) return redirect('ca');
+  const title = arg === 'week' ? `${L('साप्ताहिक करेंट अफेयर्स', 'Weekly current affairs')} · ${fmtWeek(weekKey(todayISO()))}` : arg === 'month' ? `${L('मासिक करेंट अफेयर्स', 'Monthly current affairs')} · ${fmtMonth(monthKey(todayISO()))}` : L('करेंट अफेयर्स नोट्स', 'Current affairs notes');
+  return `${appbar(`${ic('printer')} ${L('नोट्स', 'Notes')}`, { back: arg === 'week' || arg === 'month' ? 'ca' : 'news/' + arg })}
+<main class="page gutter">
+  <section class="card article"><h1>${esc(title)}</h1><div class="art-meta">MY QUIZ · ${L('तैयार', 'Prepared')} ${fmtDate(todayISO())} · ${list.length} ${L('ख़बरें', 'stories')}</div>
+    <div class="art-tools no-print"><button class="btn btn-sm btn-cta" data-act="print">${ic('printer')} ${L('प्रिंट / PDF सहेजें', 'Print / save as PDF')}</button></div></section>
+  ${list.map(n => `<article class="card article"><div class="art-meta"><span>${fmtDate(n.date)}</span><span>${esc(catLabel(n.cat))}</span>${nSrc(n) ? `<span>${L('स्रोत', 'Source')}: ${esc(nSrc(n))}</span>` : ''}</div><h1 style="font-size:1.1rem">${esc(nT(n))}</h1><p style="margin:0">${esc(nS(n))}</p>${nX(n, 'why') ? `<p class="small" style="margin:0"><b>${L('क्यों महत्वपूर्ण', 'Why it matters')}:</b> ${esc(nX(n, 'why'))}</p>` : ''}${nF(n).length ? `<ul class="small" style="margin:0;padding-left:1.2em">${nF(n).map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}</article>`).join('')}
+</main>`;
+}
+
+// ── Aaj ka Din: a 3–5 minute daily session ──
+function todayFive(iso) {
+  const m = M(), md = iso.slice(5), mon = md.slice(0, 2);
+  const own = m.dayQs.filter(q => q.day === md);
+  const month = shuffle(m.dayQs.filter(q => q.day && q.day.slice(0, 2) === mon && q.day !== md), rng('t5:' + iso));
+  const hist = shuffle(m.bySubj.history || [], rng('t5h:' + iso));
+  return uniq([...own.slice(0, 2), ...month, ...hist].map(q => q.id)).slice(0, 5).map(id => m.byId.get(id));
+}
+function vToday() {
+  const m = M(), t = todayISO();
+  const iso = dayCursor || t, md = iso.slice(5);
+  const entries = m.daysByMd[md] || [];
+  const d = entries[clamp(dayPick, 0, Math.max(0, entries.length - 1))];
+  const isToday = iso === t, dd = parseISO(iso), mon = md.slice(0, 2);
+  const rel = m.all.filter(q => q.day === md).length;
+  const up = upcomingDays(iso, 5);
+  const t5 = (U.s.t5 || {})[t];
+  const monthDays = m.days.filter(x => x.md.slice(0, 2) === mon);
+  const near = m.days.filter(x => ['जयंती', 'स्मृति दिवस'].includes(x.k) && Math.abs(diffDays(`${dd.getFullYear()}-${x.md}`, iso)) <= 10 && x !== d);
+  const session = isToday ? `<section class="card next"><span class="k">${L('आज का सत्र · 3–5 मिनट', 'Today\'s session · 3–5 min')}</span><h3>${t5 != null ? L(`आज का सत्र पूरा — 5 में से ${t5} सही`, `Session done — ${t5} of 5 right`) : L('पढ़ें → 5 प्रश्न → दोहराएँ', 'Read → 5 questions → revise')}</h3>
+    <p>${L('① नीचे की कहानी और तथ्य पढ़ें ② 5 प्रश्नों की चुनौती दें ③ फ़्लैशकार्ड से दोहराएँ।', '① Read the story and facts below ② take the 5-question challenge ③ revise with flashcards.')}</p>
+    <div class="ringbox"><span class="lvl-badge">${t5 != null ? ic('check') : '5'}</span></div>
+    <div class="grid2" style="grid-column:1/-1"><button class="btn btn-cta" data-act="today-five" ${C.baseState === 'ok' ? '' : 'disabled'}>${ic('zap')} ${t5 != null ? L('फिर से', 'Again') : L('5 प्रश्न', '5 questions')}</button><button class="btn btn-outline" data-act="cards-start" data-src="ch:${esc(d ? KIND_CH[d.k] || 'd-nat' : 'd-nat')}">${ic('cards')} ${L('फ़्लैशकार्ड', 'Flashcards')}</button></div></section>` : '';
+  let card;
+  if (C.baseState === 'loading') card = '<div class="skeleton" style="height:300px;border-radius:16px"></div>';
+  else if (!d) {
+    const nx = up[0];
+    card = `<div class="card">${emptyState('calendar', L('इस तारीख़ के लिए कोई प्रमुख दिवस दर्ज नहीं है', 'No important day is listed for this date'), nx ? `${L('अगला महत्वपूर्ण दिवस', 'Next important day')}: <b>${esc(dT(nx))}</b> (${fmtMD(nx.md)})` : '')}${nx ? `<button class="btn btn-navy btn-block" data-act="day-goto" data-iso="${nx.iso}">${L('देखें', 'View')}: ${esc(dT(nx))} ${ic('arrow-right')}</button>` : ''}</div>`;
+  } else {
+    const k = kindOf(d.k), facts = dF(d), bm = U.isBm('d', d.id);
+    card = `${entries.length > 1 ? `<div class="chips" role="group" aria-label="${L('इस दिन के दिवस', 'Days on this date')}">${entries.map((e, i) => `<button class="chip" data-act="day-pick" data-i="${i}" aria-pressed="${e === d}">${esc(dT(e))}</button>`).join('')}</div>` : ''}
+    <article class="daycard">
+      <div class="day-top">
+        <div class="day-art" role="img" aria-label="${esc(`${dd.getDate()} ${MONTHS[LANG][dd.getMonth()]} — ${kindLabel(d.k)}`)}"><span class="dn tnum">${dd.getDate()}</span><span class="dm">${MONTHS[LANG][dd.getMonth()]}</span>${ic(k.icon)}</div>
+        <div class="day-title"><span><span class="badge" style="--c2:${k.c}">${esc(kindLabel(d.k))}</span></span><h2>${esc(dT(d))}</h2><span class="small" style="color:var(--muted)">(${fmtMD(d.md)}${d.y ? ` · ${L(k.y, k.yEn)}: ${d.y}` : ''})</span></div>
+      </div>
+      <div class="day-sec">${ic('book-open')}<div><h3>${L('कहानी: शुरुआत कैसे हुई', 'The story: how it began')}</h3><p>${esc(dH(d))}</p></div></div>
+      ${dO(d) ? `<div class="day-sec">${ic('target')}<div><h3>${L('उद्देश्य', 'Purpose')}</h3><p>${esc(dO(d))}</p></div></div>` : ''}
+      ${facts.length ? `<div class="day-sec">${ic('star')}<div><h3>${L('महत्वपूर्ण तथ्य', 'Key facts')}</h3><ul>${facts.map(f => `<li>${esc(f)}</li>`).join('')}</ul></div></div>` : ''}
+      <div class="btnrow" style="padding:0 16px 16px"><button class="btn btn-sm btn-outline" data-act="bm-d" data-id="${esc(d.id)}" aria-pressed="${bm}">${ic('bookmark', bm ? 'fill' : '')} ${bm ? L('सहेजा गया', 'Saved') : L('सहेजें', 'Save')}</button><button class="btn btn-sm btn-outline" data-act="share-day" data-id="${esc(d.id)}">${ic('share')} ${L('शेयर', 'Share')}</button><a class="btn btn-sm btn-outline" href="#chapter/${esc(KIND_CH[d.k] || 'd-nat')}">${ic('layers')} ${L('जुड़ा अध्याय', 'Related chapter')}</a></div>
+    </article>
+    ${rel ? `<button class="btn btn-navy btn-block" data-act="day-quiz" data-md="${md}">${L(`इस दिन से जुड़े ${rel} प्रश्न देखें`, `See ${rel} questions about this day`)} ${ic('arrow-right')}</button>` : ''}`;
+  }
+  const tl = monthDays.map(x => `<button class="upc link" style="color:inherit;font-weight:500;text-align:left" data-act="day-goto" data-iso="${dd.getFullYear()}-${x.md}"><span class="d" ${x.md === md ? 'style="background:var(--navy);"' : ''}><b class="tnum" ${x.md === md ? 'style="color:#fff"' : ''}>${Number(x.md.slice(3))}</b><span ${x.md === md ? 'style="color:#fff"' : ''}>${monthShort(Number(mon) - 1)}</span></span><span class="row-main"><span class="row-title" style="font-size:.98rem">${esc(dT(x))}</span><span class="row-sub">${esc(kindLabel(x.k))}${x.y ? ` · ${x.y}` : ''}</span></span></button>`).join('');
+  return `${appbar(`${ic('calendar')} ${L('आज का दिन', 'Today in History')}`, { back: 'learn', right: `<button class="iconbtn" data-act="day-calendar" aria-label="${L('कैलेंडर से तारीख़ चुनें', 'Pick a date from the calendar')}">${ic('list')}</button>` })}
+<main class="page gutter">
+  <div class="daynav">
+    <button class="iconbtn" data-act="day-step" data-v="-1" aria-label="${L('पिछला दिन', 'Previous day')}">${ic('chev-left')}</button>
+    <div class="when tnum">${isToday ? L('आज, ', 'Today, ') : ''}${fmtDate(iso, false)}<small>${WEEKDAYS[LANG][dd.getDay()]}${isToday ? '' : ` · <button class="link" data-act="day-today">${L('आज पर लौटें', 'Back to today')}</button>`}</small></div>
+    <button class="iconbtn" data-act="day-step" data-v="1" aria-label="${L('अगला दिन', 'Next day')}">${ic('chev-right')}</button>
+  </div>
+  ${C.baseState === 'error' ? dataErrorNote() : ''}
+  ${session}
+  ${card}
+  ${near.length ? `<section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('users')} ${L('आसपास की जयंतियाँ और स्मृति दिवस', 'Anniversaries around this date')}</h2>${near.map(x => `<button class="upc link" style="color:inherit;font-weight:500;text-align:left" data-act="day-goto" data-iso="${dd.getFullYear()}-${x.md}"><span class="d"><b class="tnum">${Number(x.md.slice(3))}</b><span>${monthShort(Number(x.md.slice(0, 2)) - 1)}</span></span><span class="row-main"><span class="row-title" style="font-size:.98rem">${esc(dT(x))}</span><span class="row-sub">${esc(kindLabel(x.k))}</span></span></button>`).join('')}</section>` : ''}
+  ${tl ? `<section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('clock')} ${L(`${MONTHS.hi[Number(mon) - 1]} की समय-रेखा`, `${MONTHS.en[Number(mon) - 1]} timeline`)}</h2>${tl}</section>` : ''}
+  ${up.length ? `<section class="card" style="display:flex;flex-direction:column;gap:12px"><h2 class="sec-title" style="font-size:1rem">${ic('calendar')} ${L('आने वाले महत्वपूर्ण दिवस', 'Coming up')}</h2>${up.map(e => { const dn = diffDays(t, e.iso); return `<button class="upc link" style="color:inherit;font-weight:500;text-align:left" data-act="day-goto" data-iso="${e.iso}"><span class="d"><b class="tnum">${parseISO(e.iso).getDate()}</b><span>${monthShort(parseISO(e.iso).getMonth())}</span></span><span class="row-main"><span class="row-title" style="font-size:.98rem">${esc(dT(e))}</span><span class="row-sub">${esc(kindLabel(e.k))} · ${dn === 1 ? L('कल', 'tomorrow') : dn > 0 ? L(`${dn} दिन बाद`, `in ${dn} days`) : fmtDate(e.iso, false)}</span></span></button>`; }).join('')}</section>` : ''}
+</main>
+${bottomNav('today')}`;
 }
 
 // ───────────────────────────── views: admin ─────────────────────────────
@@ -1749,7 +2305,7 @@ const typeLabel = t => { const x = TYPE_LABEL[t === 'days' ? 'day' : t]; return 
 function vNoAdmin() {
   return `${appbar(L('एडमिन पैनल', 'Admin panel'), { back: 'profile' })}<main class="page gutter"><div class="card">${emptyState('lock', L('यह भाग केवल संपादकों के लिए है', 'This area is for editors only'), P.ready ? L('सामग्री जोड़ने या प्रकाशित करने के लिए इस ऐप के संपादक से पहुँच माँगें।', 'Ask an editor of this app for access to add or publish content.') : L('आपकी पहुँच जाँची जा रही है…', 'Checking your access…'))}</div></main>`;
 }
-const ADMIN_ROUTES = new Set(['admin', 'admin-ai', 'admin-review', 'admin-publish', 'admin-bank', 'admin-news', 'admin-days', 'admin-rewards']);
+const ADMIN_ROUTES = new Set(['admin', 'admin-ai', 'admin-review', 'admin-publish', 'admin-bank', 'admin-news', 'admin-days', 'admin-rewards', 'admin-translate', 'admin-analytics', 'admin-io']);
 function cmsNote() {
   if (P.demo) return `<div class="note">${ic('info')}<div>${L('<b>टेस्ट संस्करण:</b> यहाँ किए बदलाव केवल आपके ब्राउज़र में सहेजे जाते हैं — बेझिझक आज़माएँ। असली ऐप पर कोई असर नहीं होगा।', '<b>Test build:</b> changes here are saved only in your browser, so try anything. The real app is not affected.')}</div></div>`;
   if (P.mode === 'standalone') return `<div class="note">${ic('info')}<div>${L('<b>डेमो मोड:</b> यहाँ किए बदलाव केवल इसी ब्राउज़र में सहेजे जाते हैं। असली ऐप में यही पैनल सर्वर से जुड़ेगा।', '<b>Demo mode:</b> changes here are saved only in this browser. In the real app this panel connects to the server.')}</div></div>`;
@@ -1771,7 +2327,7 @@ function vAdmin() {
   const players = LB.board('week').filter(r => r.p > 0).length;
   const act = (href, icon, label, cnt = 0) => `<a class="act" href="#${href}"><span class="ai">${ic(icon)}</span><span>${label}</span>${ic('chev-right', 'chev')}${cnt ? `<span class="cnt">${cnt}</span>` : ''}</a>`;
   return `<header class="appbar admin-hero"><div class="appbar-in gutter">
-    <div class="logo" style="flex:1;font-size:1.45rem">${capLogo()}<span>MY <span class="q">QUIZ</span><small>ADMIN PANEL</small></span></div>
+    <div class="logo" style="flex:1;min-width:0;font-size:1.3rem;overflow:hidden">${capLogo()}<span>MY <span class="q">QUIZ</span><small>ADMIN PANEL</small></span></div>
     ${langBtn()}
     <a class="iconbtn" href="#home" aria-label="${L('ऐप पर लौटें', 'Back to the app')}" title="${L('ऐप पर लौटें', 'Back to the app')}">${ic('settings')}</a>
   </div></header>
@@ -1795,7 +2351,11 @@ function vAdmin() {
     ${act('admin-review', 'shield', L('सामग्री की जाँच करें', 'Review content'), pending.length + reports)}
     ${act('admin-bank', 'book', L('GK प्रश्न बैंक', 'GK question bank'))}
     ${act('admin-publish', 'send', L('प्रकाशित करें', 'Publish'), approved)}
+    ${act('admin-translate', 'languages', L('अनुवाद प्रबंधन', 'Translations'), missingEn().length)}
+    ${act('admin-analytics', 'chart', L('विश्लेषण', 'Analytics'))}
+    ${act('admin-io', 'download', L('आयात / निर्यात', 'Import / export'))}
   </div>
+  <button class="switch" data-act="cms-foureyes" role="switch" aria-checked="${CMSSET.fourEyes}"><span class="row-main"><b>${L('दूसरे संपादक की मंज़ूरी ज़रूरी', 'Require a second editor\'s approval')}</b><span class="row-sub">${L('ड्राफ़्ट बनाने वाला संपादक उसे ख़ुद स्वीकृत नहीं कर सकेगा (केवल मालिक बदल सकता है)। आपकी भूमिका: ', 'The editor who created a draft cannot approve it (owner only). Your role: ')}${LOCAL() ? L('डेमो', 'demo') : P.owner ? L('मालिक', 'owner') : L('संपादक', 'editor')}</span></span><span class="knob" aria-hidden="true"></span></button>
 </main>`;
 }
 
@@ -1892,9 +2452,10 @@ function vAdminReview() {
     return `<article class="card draft">
     <div class="draft-head"><span class="tag ${d.origin === 'ai' ? 'tag-ai' : ''}">${d.origin === 'ai' ? 'AI' : L('मैनुअल', 'Manual')}</span><span class="tag">${typeLabel(d.type)}</span>${base ? `<span class="tag">${L('मूल प्रश्न में संपादन', 'Edit of a built-in question')}</span>` : ''}${d.note && !base ? `<span class="tag">${esc(d.note)}</span>` : ''}<span class="small muted">${relTime(d.createdAt)}</span></div>
     ${draftPreview(d)}
+    ${qualityHtml(d)}
     ${d.source ? `<details><summary class="small" style="cursor:pointer;font-weight:700;color:var(--brand)">${L('स्रोत पाठ देखें', 'Show source text')}</summary><p class="small" style="white-space:pre-wrap;margin:6px 0 0">${esc(d.source)}</p></details>` : ''}
     <fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:8px"><legend class="small muted" style="padding:0;margin-bottom:6px">${L('समीक्षा सूची — सभी पर निशान लगाने के बाद ही स्वीकृति', 'Review checklist: tick every item to approve')}</legend>${checks.map((c, i) => `<label class="check"><input type="checkbox" data-chk="${esc(d.id)}" data-ci="${i}" ${(reviewChecks[d.id] || [])[i] ? 'checked' : ''}> ${L(c[0], c[1])}</label>`).join('')}</fieldset>
-    <div class="btnrow"><button class="btn btn-sm btn-cta" id="ap-${esc(d.id)}" data-act="draft-approve" data-id="${esc(d.id)}" ${checks.every((_, i) => (reviewChecks[d.id] || [])[i]) ? '' : 'disabled'}>${ic('check')} ${L('स्वीकृत करें', 'Approve')}</button><button class="btn btn-sm btn-outline" data-act="draft-edit" data-id="${esc(d.id)}">${ic('pencil')} ${L('संपादित करें', 'Edit')}</button><button class="btn btn-sm btn-danger" data-act="draft-reject" data-id="${esc(d.id)}">${ic('trash')} ${L('अस्वीकार', 'Reject')}</button></div>
+    <div class="btnrow"><button class="btn btn-sm btn-cta" id="ap-${esc(d.id)}" data-act="draft-approve" data-id="${esc(d.id)}" data-block="${hasErr(d) || otherEditorNeeded(d) ? 1 : 0}" ${checks.every((_, i) => (reviewChecks[d.id] || [])[i]) && !hasErr(d) && !otherEditorNeeded(d) ? '' : 'disabled'}>${ic('check')} ${L('स्वीकृत करें', 'Approve')}</button><button class="btn btn-sm btn-outline" data-act="draft-edit" data-id="${esc(d.id)}">${ic('pencil')} ${L('संपादित करें', 'Edit')}</button><button class="btn btn-sm btn-danger" data-act="draft-reject" data-id="${esc(d.id)}">${ic('trash')} ${L('अस्वीकार', 'Reject')}</button></div>
   </article>`;
   }).join('');
   const rl = reports.map(r => {
@@ -1941,7 +2502,7 @@ function bankListHtml() {
   const del = q => q.src === 'base' ? L('छिपाएँ', 'Hide') : q.src === 'edited' ? L('मूल पर लौटाएँ', 'Restore original') : L('हटाएँ', 'Remove');
   const enTag = q => (q.en && q.en.q ? '<span class="tag">EN ✓</span>' : `<span class="tag tag-warn">${L('EN नहीं', 'No EN')}</span>`);
   return `<p class="small muted" style="margin:0">${L(`${all.length} प्रश्न`, `${all.length} questions`)}${bankState.subj ? '' : L(` · इनके अलावा ${m.dayQs.length} प्रश्न "महत्वपूर्ण दिवस" कैलेंडर से अपने-आप बनते हैं`, ` · plus ${m.dayQs.length} questions made automatically from the important-days calendar`)}</p>
-  <div class="list">${list.map(q => `<div class="review-item"><div class="draft-head">${tag(q)}${enTag(q)}<span class="small muted">${esc(subjName(q.s))}${q.t ? ' · ' + esc(qTopic(q)) : ''}</span></div><b>${esc(qT(q))}</b><span class="ans">${L('उत्तर', 'Answer')}: <span class="ans-ok">${esc(qO(q)[q.a])}</span></span><div class="btnrow" style="gap:14px"><button class="link" data-act="bank-edit" data-id="${esc(q.id)}">${ic('pencil')} ${L('संपादित करें', 'Edit')}</button><button class="link" style="color:var(--bad)" data-act="bank-remove" data-id="${esc(q.id)}">${ic('trash')} ${del(q)}</button></div></div>`).join('') || emptyState('search', L('कोई प्रश्न नहीं मिला', 'No questions found'), '')}</div>
+  <div class="list">${list.map(q => `<div class="review-item"><div class="draft-head">${tag(q)}${enTag(q)}<span class="small muted">${esc(subjName(q.s))}${q.t ? ' · ' + esc(qTopic(q)) : ''}</span></div><b>${esc(qT(q))}</b><span class="ans">${L('उत्तर', 'Answer')}: <span class="ans-ok">${esc(qO(q)[q.a])}</span></span><div class="btnrow" style="gap:14px"><button class="link" data-act="bank-edit" data-id="${esc(q.id)}">${ic('pencil')} ${L('संपादित करें', 'Edit')}</button><button class="link" data-act="bank-history" data-id="${esc(q.id)}">${ic('clock')} ${L('इतिहास', 'History')}</button><button class="link" style="color:var(--bad)" data-act="bank-remove" data-id="${esc(q.id)}">${ic('trash')} ${del(q)}</button></div></div>`).join('') || emptyState('search', L('कोई प्रश्न नहीं मिला', 'No questions found'), '')}</div>
   ${all.length > list.length ? `<button class="btn btn-outline" data-act="bank-more">${L('और दिखाएँ', 'Show more')} (${all.length - list.length})</button>` : ''}`;
 }
 function vAdminBank() {
@@ -2118,31 +2679,6 @@ function vAdminRewards() {
 </main>`;
 }
 
-// Question editor (sheet) — used by AI results, review, bank and new questions.
-let qEditCb = null;
-function openQEditor(init, onSave, title) {
-  const q = { s: 'misc', t: '', q: '', o: ['', '', '', ''], a: 0, e: '', d: 1, ...clone(init || {}) };
-  const en = q.en && typeof q.en === 'object' ? q.en : { q: '', o: ['', '', '', ''], e: '', t: '' };
-  const eo = Array.isArray(en.o) ? en.o : ['', '', '', ''];
-  title = title || L('प्रश्न संपादित करें', 'Edit question');
-  qEditCb = onSave;
-  openSheet(`${sheetHead(title)}<form data-form="qedit" style="display:flex;flex-direction:column;gap:12px">
-  <div class="grid2"><div class="field"><label for="qe-s">${L('विषय', 'Subject')}</label><select class="select" id="qe-s">${SUBJECTS.filter(s => s.k !== 'days').map(s => `<option value="${s.k}" ${s.k === q.s ? 'selected' : ''}>${subjName(s.k)}</option>`).join('')}</select></div>
-  <div class="field"><label for="qe-d">${L('कठिनाई', 'Difficulty')}</label><select class="select" id="qe-d">${[[1, 'आसान', 'Easy'], [2, 'मध्यम', 'Medium'], [3, 'कठिन', 'Hard']].map(([v, hi, enl]) => `<option value="${v}" ${Number(q.d) === v ? 'selected' : ''}>${L(hi, enl)}</option>`).join('')}</select></div></div>
-  <div class="field"><label for="qe-t">${L('उप-विषय', 'Topic')}</label><input class="input" id="qe-t" value="${esc(q.t || '')}" maxlength="40"></div>
-  <div class="field"><label for="qe-q">${L('प्रश्न', 'Question')} (हिंदी)</label><textarea class="textarea" id="qe-q" rows="3" style="min-height:80px">${esc(q.q)}</textarea></div>
-  <div class="field"><span class="lbl">${L('विकल्प', 'Options')} <span class="muted small">(${L('सही विकल्प चुनें', 'select the right one')})</span></span>${[0, 1, 2, 3].map(i => `<div class="optedit"><input type="radio" name="qe-a" value="${i}" ${q.a === i ? 'checked' : ''} aria-label="${L(`विकल्प ${LETTERS[i]} सही है`, `Option ${LETTERS[i]} is right`)}"><input class="input" id="qe-o${i}" value="${esc(q.o[i] || '')}" placeholder="${L('विकल्प', 'Option')} ${LETTERS[i]}"></div>`).join('')}</div>
-  <div class="field"><label for="qe-e">${L('व्याख्या', 'Explanation')}</label><textarea class="textarea" id="qe-e" rows="3" style="min-height:80px">${esc(q.e || '')}</textarea></div>
-  <details class="en-fields" ${en.q ? 'open' : ''}><summary>${ic('languages')} English ${optional()}</summary>
-    <p class="small muted" style="margin:0">${L('विकल्प उसी क्रम में लिखें — सही उत्तर वही रहेगा जो ऊपर चुना है।', 'Write the options in the same order; the right answer is the one selected above.')}</p>
-    <div class="field"><label for="qe-en-q">Question (English)</label><textarea class="textarea" id="qe-en-q" rows="2" style="min-height:70px" lang="en">${esc(en.q || '')}</textarea></div>
-    ${[0, 1, 2, 3].map(i => `<div class="field"><label for="qe-en-o${i}" class="small">Option ${LETTERS[i]}</label><input class="input" id="qe-en-o${i}" value="${esc(eo[i] || '')}" lang="en"></div>`).join('')}
-    <div class="field"><label for="qe-en-e">Explanation (English)</label><textarea class="textarea" id="qe-en-e" rows="2" style="min-height:70px" lang="en">${esc(en.e || '')}</textarea></div>
-    <div class="field"><label for="qe-en-t">Topic (English)</label><input class="input" id="qe-en-t" value="${esc(en.t || '')}" maxlength="40" lang="en"></div>
-  </details>
-  <p class="small" id="qe-err" style="margin:0;color:var(--bad)" role="alert"></p>
-  <button class="btn btn-cta btn-block" type="submit">${ic('check')} ${L('सहेजें', 'Save')}</button></form>`, { label: title });
-}
 function newsEditorSheet(d) {
   const title = L('समाचार संपादित करें', 'Edit news');
   openSheet(`${sheetHead(title)}<form data-form="news-edit" data-id="${esc(d.id)}" style="display:flex;flex-direction:column;gap:12px">${newsFields('ne', d.data)}<p class="small" id="ne-err" style="margin:0;color:var(--bad)" role="alert"></p><button class="btn btn-cta btn-block" type="submit">${ic('check')} ${L('सहेजें', 'Save')}</button></form>`, { label: title });
@@ -2155,6 +2691,221 @@ let confirmCb = null;
 function confirmSheet(title, text, okLabel, onOk, danger = true) {
   confirmCb = onOk;
   openSheet(`${sheetHead(title)}<div style="margin:0">${text}</div><div class="grid2"><button class="btn btn-grey" data-act="sheet-close">${L('रद्द करें', 'Cancel')}</button><button class="btn ${danger ? 'btn-danger' : 'btn-cta'}" data-act="confirm-ok">${okLabel}</button></div>`, { label: title });
+}
+
+// ───────────────────────────── v3 admin: quality checks, tagging, translations, history, import/export, analytics ─────────────────────────────
+const CMSSET = { fourEyes: false };          // pub/settings/items/cms (owner): a second editor must approve
+const norm = s => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+const words = s => new Set(norm(s).split(' ').filter(w => w.length > 1));
+function similarity(a, b) { const A = words(a), B = words(b); if (!A.size || !B.size) return 0; let n = 0; for (const w of A) if (B.has(w)) n++; return n / (A.size + B.size - n); }
+// Automated checks run on every question draft before a human sees it. err blocks approval; warn needs attention.
+function qualityChecks(d) {
+  const x = d.data || {}, out = [], add = (lvl, hi, en) => out.push({ lvl, msg: L(hi, en) });
+  if (d.type !== 'q') {
+    if (d.type === 'news' && !(x.source && x.source.name)) add('warn', 'स्रोत का नाम नहीं दिया गया।', 'No source name given.');
+    if (!x.en || !(x.en.title || x.en.t)) add('warn', 'अंग्रेज़ी संस्करण नहीं है।', 'No English version.');
+    if (!out.length) add('ok', 'बुनियादी जाँच ठीक।', 'Basic checks passed.');
+    return out;
+  }
+  const o = Array.isArray(x.o) ? x.o : [];
+  if (o.length !== 4 || o.some(s => !String(s).trim())) add('err', 'चार भरे हुए विकल्प चाहिए।', 'Four filled-in options are required.');
+  else if (new Set(o.map(norm)).size !== 4) add('err', 'दो विकल्प एक जैसे हैं।', 'Two options are the same.');
+  if (!(Number.isInteger(x.a) && x.a >= 0 && x.a <= 3)) add('err', 'सही उत्तर चुना नहीं गया।', 'The correct answer is not set.');
+  if (String(x.q || '').trim().length < 12) add('err', 'प्रश्न बहुत छोटा है।', 'The question is too short.');
+  if (String(x.e || '').trim().length < 20) add('warn', 'व्याख्या बहुत छोटी है।', 'The explanation is very short.');
+  const ans = o[x.a] || '';
+  if (ans && x.e && !norm(x.e).includes(norm(ans)) && !(x.en && x.en.e && norm(x.en.e).includes(norm((x.en.o || [])[x.a] || '')))) add('warn', 'व्याख्या में सही उत्तर का ज़िक्र नहीं है — मिलान करें।', 'The explanation does not mention the correct answer — check it.');
+  if (d.source && ans && !norm(d.source).includes(norm(ans)) && !norm(d.source).includes(norm((x.en && (x.en.o || [])[x.a]) || '~'))) add('warn', 'सही उत्तर स्रोत पाठ में नहीं मिला — तथ्य जाँचें।', 'The correct answer was not found in the source text — verify the fact.');
+  const all = [...M().qs, ...C.drafts.filter(y => y.type === 'q' && y.id !== d.id).map(y => y.data || {})];
+  const dup = all.filter(y => y && y.id !== x.id && y.q).map(y => ({ y, s: similarity(x.q, y.q) })).filter(z => z.s >= 0.6).sort((a, b) => b.s - a.s)[0];
+  if (dup) add('warn', `संभावित दोहराव (${Math.round(dup.s * 100)}% समान): "${String(dup.y.q).slice(0, 70)}"`, `Possible duplicate (${Math.round(dup.s * 100)}% similar): "${String(dup.y.q).slice(0, 70)}"`);
+  if (!x.en || !x.en.q || !Array.isArray(x.en.o) || x.en.o.length !== 4) add('warn', 'अंग्रेज़ी अनुवाद नहीं है।', 'No English translation.');
+  if (!x.ch) add('warn', 'अध्याय टैग नहीं है।', 'No chapter tag.');
+  const why = Array.isArray(x.why) ? x.why : [];
+  if (why.filter((w, i) => i !== x.a && String(w || '').trim()).length < 3) add('warn', 'हर गलत विकल्प के लिए "क्यों गलत" नोट जोड़ें।', 'Add a "why it\'s wrong" note for every wrong option.');
+  if (!x.ref && !x.n) add('warn', 'स्रोत/संदर्भ नहीं दिया गया।', 'No source or reference given.');
+  if (!out.length) add('ok', 'सभी स्वचालित जाँच ठीक।', 'All automated checks passed.');
+  return out;
+}
+const hasErr = d => qualityChecks(d).some(c => c.lvl === 'err');
+const otherEditorNeeded = d => CMSSET.fourEyes && !LOCAL() && d.by && d.by === P.uid;
+function qualityHtml(d) {
+  const cs = qualityChecks(d);
+  return `<div class="ex-sec" style="border-top:1px dashed var(--line)"><h4>${ic('shield')} ${L('स्वचालित जाँच', 'Automated checks')}</h4><ul class="why-list">${cs.map(c => `<li class="${c.lvl === 'ok' ? 'c' : ''}"><span class="key" aria-hidden="true">${c.lvl === 'ok' ? '✓' : c.lvl === 'err' ? '✕' : '!'}</span><span>${esc(c.msg)}</span></li>`).join('')}</ul>
+    ${otherEditorNeeded(d) ? `<p class="small" style="margin:0;color:var(--warn)">${ic('users')} ${L('यह ड्राफ़्ट आपने बनाया है — किसी दूसरे संपादक को स्वीकृत करना होगा।', 'You created this draft — another editor must approve it.')}</p>` : ''}</div>`;
+}
+
+// Question editor v3: tags (chapter, exams, difficulty), notes for wrong options, background and reference, English.
+let qEditCb = null;
+function openQEditor(init, onSave, title) {
+  const q = { s: 'misc', t: '', q: '', o: ['', '', '', ''], a: 0, e: '', d: 1, ...clone(init || {}) };
+  const en = q.en && typeof q.en === 'object' ? q.en : {};
+  const eo = Array.isArray(en.o) ? en.o : ['', '', '', ''];
+  const why = Array.isArray(q.why) ? q.why : ['', '', '', ''], ewhy = Array.isArray(en.why) ? en.why : ['', '', '', ''];
+  const chs = CHAPTERS.filter(c => c.s === q.s);
+  const ex = Array.isArray(q.ex) ? q.ex : [];
+  title = title || L('प्रश्न संपादित करें', 'Edit question');
+  qEditCb = onSave;
+  openSheet(`${sheetHead(title)}<form data-form="qedit" style="display:flex;flex-direction:column;gap:12px">
+  <div class="grid2"><div class="field"><label for="qe-s">${L('विषय', 'Subject')}</label><select class="select" id="qe-s" data-change="qe-subj">${SUBJECTS.filter(s => s.k !== 'days').map(s => `<option value="${s.k}" ${s.k === q.s ? 'selected' : ''}>${subjName(s.k)}</option>`).join('')}</select></div>
+  <div class="field"><label for="qe-d">${L('कठिनाई', 'Difficulty')}</label><select class="select" id="qe-d">${[1, 2, 3].map(v => `<option value="${v}" ${Number(q.d) === v ? 'selected' : ''}>${esc(diffLabel(v))}</option>`).join('')}</select></div></div>
+  <div class="grid2"><div class="field"><label for="qe-ch">${L('अध्याय', 'Chapter')}</label><select class="select" id="qe-ch"><option value="">—</option>${chs.map(c => `<option value="${c.id}" ${q.ch === c.id ? 'selected' : ''}>${esc(L(c.hi, c.en))}</option>`).join('')}</select></div>
+  <div class="field"><label for="qe-t">${L('उप-विषय', 'Topic')}</label><input class="input" id="qe-t" value="${esc(q.t || '')}" maxlength="40"></div></div>
+  <div class="field"><span class="lbl">${L('परीक्षा टैग', 'Exam tags')} <span class="muted small">(${L('खाली = अध्याय के अनुसार', 'empty = from the chapter')})</span></span><div class="chips wrap">${EXAMS.map(e => `<label class="chip"><input type="checkbox" name="qe-ex" value="${e.id}" ${ex.includes(e.id) ? 'checked' : ''} style="accent-color:var(--navy)"> ${esc(L(e.hi, e.en))}</label>`).join('')}</div></div>
+  <div class="field"><label for="qe-q">${L('प्रश्न', 'Question')} (हिंदी)</label><textarea class="textarea" id="qe-q" rows="3" style="min-height:80px">${esc(q.q)}</textarea></div>
+  <div class="field"><span class="lbl">${L('विकल्प और "क्यों गलत" नोट', 'Options and "why it\'s wrong" notes')} <span class="muted small">(${L('सही विकल्प चुनें', 'select the right one')})</span></span>${[0, 1, 2, 3].map(i => `<div class="optedit"><input type="radio" name="qe-a" value="${i}" ${q.a === i ? 'checked' : ''} aria-label="${L(`विकल्प ${LETTERS[i]} सही है`, `Option ${LETTERS[i]} is right`)}"><input class="input" id="qe-o${i}" value="${esc(q.o[i] || '')}" placeholder="${L('विकल्प', 'Option')} ${LETTERS[i]}"></div><input class="input" id="qe-w${i}" value="${esc(why[i] || '')}" placeholder="${L(`${LETTERS[i]} क्यों गलत है (सही विकल्प के लिए खाली छोड़ें)`, `Why ${LETTERS[i]} is wrong (leave empty for the right one)`)}" style="margin:4px 0 8px 30px;width:calc(100% - 30px);font-size:.9rem">`).join('')}</div>
+  <div class="field"><label for="qe-e">${L('व्याख्या', 'Explanation')}</label><textarea class="textarea" id="qe-e" rows="3" style="min-height:80px">${esc(q.e || '')}</textarea></div>
+  <div class="field"><label for="qe-ctx">${L('पृष्ठभूमि / जुड़े तथ्य', 'Background / related facts')} ${optional()}</label><textarea class="textarea" id="qe-ctx" rows="2" style="min-height:64px">${esc(q.ctx || '')}</textarea></div>
+  <div class="field"><label for="qe-ref">${L('स्रोत / संदर्भ', 'Source / reference')}</label><input class="input" id="qe-ref" value="${esc(q.ref || '')}" placeholder="${L('जैसे: NCERT कक्षा 9 भूगोल – अपवाह', 'e.g. NCERT Class 9 Geography – Drainage')}"></div>
+  <details class="en-fields" ${en.q ? 'open' : ''}><summary>${ic('languages')} English ${optional()}</summary>
+    <p class="small muted" style="margin:0">${L('विकल्प उसी क्रम में लिखें — सही उत्तर वही रहेगा जो ऊपर चुना है।', 'Write the options in the same order; the right answer is the one selected above.')}</p>
+    <div class="field"><label for="qe-en-q">Question (English)</label><textarea class="textarea" id="qe-en-q" rows="2" style="min-height:70px" lang="en">${esc(en.q || '')}</textarea></div>
+    ${[0, 1, 2, 3].map(i => `<div class="field"><label for="qe-en-o${i}" class="small">Option ${LETTERS[i]}</label><input class="input" id="qe-en-o${i}" value="${esc(eo[i] || '')}" lang="en"><input class="input" id="qe-en-w${i}" value="${esc(ewhy[i] || '')}" lang="en" placeholder="Why ${LETTERS[i]} is wrong" style="margin-top:4px;font-size:.9rem"></div>`).join('')}
+    <div class="field"><label for="qe-en-e">Explanation (English)</label><textarea class="textarea" id="qe-en-e" rows="2" style="min-height:70px" lang="en">${esc(en.e || '')}</textarea></div>
+    <div class="field"><label for="qe-en-ctx">Background (English)</label><textarea class="textarea" id="qe-en-ctx" rows="2" style="min-height:64px" lang="en">${esc(en.ctx || '')}</textarea></div>
+    <div class="grid2"><div class="field"><label for="qe-en-t">Topic (English)</label><input class="input" id="qe-en-t" value="${esc(en.t || '')}" maxlength="40" lang="en"></div><div class="field"><label for="qe-en-ref">Reference (English)</label><input class="input" id="qe-en-ref" value="${esc(en.ref || '')}" lang="en"></div></div>
+  </details>
+  <p class="small" id="qe-err" style="margin:0;color:var(--bad)" role="alert"></p>
+  <button class="btn btn-cta btn-block" type="submit">${ic('check')} ${L('सहेजें', 'Save')}</button></form>`, { label: title });
+}
+
+// Translation queue: content still missing English.
+function missingEn() {
+  const m = M();
+  return [
+    ...m.qs.filter(q => !(q.en && q.en.q && Array.isArray(q.en.o) && q.en.o.length === 4)).map(q => ({ kind: 'q', id: q.id, text: q.q })),
+    ...m.news.filter(n => !(n.en && n.en.title)).map(n => ({ kind: 'news', id: n.id, text: n.title })),
+    ...m.days.filter(d => !(d.en && d.en.t)).map(d => ({ kind: 'day', id: d.id, text: d.t })),
+  ];
+}
+function vAdminTranslate() {
+  if (!P.isAdmin) return vNoAdmin();
+  const m = M(), miss = missingEn();
+  const pctEn = (list, ok) => pct(list.filter(ok).length, list.length);
+  const qOk = q => q.en && q.en.q, nOk = n => n.en && n.en.title, dOk = d => d.en && d.en.t;
+  return `${adminBar(L('अनुवाद प्रबंधन', 'Translation management'))}
+<main class="page gutter">
+  ${cmsNote()}
+  <div class="stats stats-3"><div class="stat"><b>${pctEn(m.qs, qOk)}%</b><span>${L('प्रश्न', 'Questions')}</span></div><div class="stat"><b>${pctEn(m.news, nOk)}%</b><span>${L('समाचार', 'News')}</span></div><div class="stat"><b>${pctEn(m.days, dOk)}%</b><span>${L('दिवस', 'Days')}</span></div></div>
+  <p class="small muted" style="margin:0">${L('अंग्रेज़ी में उपलब्ध सामग्री का प्रतिशत। अनुवाद जोड़ने पर बदलाव समीक्षा के बाद ही प्रकाशित होता है।', 'Share of content available in English. A new translation is published only after review.')}</p>
+  <section class="sec"><h2 class="sec-title">${ic('languages')} ${L(`अंग्रेज़ी बाकी (${miss.length})`, `Missing English (${miss.length})`)}</h2>
+    <div class="list">${miss.slice(0, 40).map(x => `<div class="row"><span class="row-main"><span class="row-title" style="font-size:.95rem">${esc(String(x.text).slice(0, 90))}</span><span class="row-sub">${typeLabel(x.kind)}</span></span>${x.kind === 'q' ? `<button class="btn btn-sm btn-outline" data-act="bank-edit" data-id="${esc(x.id)}">${ic('pencil')} ${L('अनुवाद', 'Translate')}</button>` : `<span class="small muted">${L('समाचार/दिवस प्रबंधन में', 'In News/Days')}</span>`}</div>`).join('') || `<div class="empty">${ic('check')}<b>${L('सारी सामग्री दोनों भाषाओं में है', 'Everything is available in both languages')}</b></div>`}</div></section>
+</main>`;
+}
+
+// Content inventory & learner analytics for editors.
+function vAdminAnalytics() {
+  if (!P.isAdmin) return vNoAdmin();
+  const m = M(), qs = m.qs;
+  const byDiff = [1, 2, 3].map(d => qs.filter(q => (q.d || 1) === d).length);
+  const withWhy = qs.filter(q => Array.isArray(q.why) && q.why.filter(Boolean).length >= 3).length;
+  const withRef = qs.filter(q => q.ref || q.n).length;
+  const reps = {};
+  for (const r of C.reports) reps[r.qid] = (reps[r.qid] || 0) + 1;
+  const topRep = Object.entries(reps).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const t = todayISO(), wk = weekKey(t);
+  const active = LB.pool().filter(e => e.wk === wk && e.wp > 0);
+  const chRows = CHAPTERS.filter(c => c.s !== 'days').map(c => ({ c, n: (m.byCh[c.id] || []).filter(q => !q.gen).length })).sort((a, b) => a.n - b.n);
+  return `${adminBar(L('सामग्री और उपयोग विश्लेषण', 'Content and usage analytics'))}
+<main class="page gutter">
+  <section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('book')} ${L('प्रश्न बैंक', 'Question bank')}</h2>
+    <div class="stats stats-3"><div class="stat"><b>${qs.length}</b><span>${L('प्रश्न', 'Questions')}</span></div><div class="stat"><b>${m.dayQs.length}</b><span>${L('कैलेंडर से', 'From calendar')}</span></div><div class="stat"><b>${m.news.length}</b><span>${L('समाचार', 'News')}</span></div></div>
+    <div class="cmp">${[1, 2, 3].map((d, i) => `<span>${esc(diffLabel(d))}</span><span class="track" style="height:8px;border-radius:999px;background:var(--grey);overflow:hidden;min-width:80px"><i style="display:block;height:100%;width:${pct(byDiff[i], qs.length)}%;background:var(--sky)"></i></span><b>${byDiff[i]}</b>`).join('')}</div>
+    <p class="small muted" style="margin:0">${L(`"क्यों गलत" नोट: ${pct(withWhy, qs.length)}% · स्रोत/संदर्भ: ${pct(withRef, qs.length)}%`, `"Why it's wrong" notes: ${pct(withWhy, qs.length)}% · source/reference: ${pct(withRef, qs.length)}%`)}</p></section>
+  <section class="sec"><h2 class="sec-title">${ic('layers')} ${L('सबसे कम प्रश्नों वाले अध्याय', 'Chapters with the fewest questions')}</h2><div class="list">${chRows.slice(0, 6).map(r => `<a class="row" href="#chapter/${r.c.id}"><span class="row-main"><span class="row-title" style="font-size:.95rem">${esc(L(r.c.hi, r.c.en))}</span><span class="row-sub">${esc(subjName(r.c.s))}</span></span><b class="tnum">${r.n}</b></a>`).join('')}</div><p class="small muted" style="margin:0">${L('यहाँ से शुरू करें: AI या प्रश्न बैंक से इन अध्यायों में प्रश्न जोड़ें।', 'Start here: add questions to these chapters with AI or the question bank.')}</p></section>
+  <section class="sec"><h2 class="sec-title">${ic('flag')} ${L('सबसे ज़्यादा रिपोर्ट किए गए प्रश्न', 'Most-reported questions')}</h2><div class="list">${topRep.map(([id, n]) => { const q = m.byId.get(id); return `<div class="row"><span class="row-main"><span class="row-title" style="font-size:.95rem">${esc(q ? q.q.slice(0, 90) : id)}</span></span><b class="tnum">${n}</b></div>`; }).join('') || `<div class="empty">${L('कोई रिपोर्ट नहीं', 'No reports')}</div>`}</div></section>
+  <section class="card" style="display:flex;flex-direction:column;gap:8px"><h2 class="sec-title" style="font-size:1rem">${ic('users')} ${L('विद्यार्थी (इस सप्ताह)', 'Students (this week)')}</h2>
+    <div class="stats stats-3"><div class="stat"><b>${active.length}</b><span>${L('सक्रिय', 'Active')}</span></div><div class="stat"><b>${fmtNum(active.reduce((x, e) => x + (e.wp || 0), 0))}</b><span>${L('कुल पॉइंट्स', 'Total points')}</span></div><div class="stat"><b>${active.length ? fmtNum(Math.round(active.reduce((x, e) => x + (e.wp || 0), 0) / active.length)) : 0}</b><span>${L('औसत', 'Average')}</span></div></div>
+    <p class="small muted" style="margin:0">${LOCAL() ? L('ऑफ़लाइन/टेस्ट संस्करण में यहाँ केवल इस डिवाइस या नमूना विद्यार्थियों का डेटा है।', 'In the offline/test build this shows only this device or sample students.') : L('लीडरबोर्ड पर दिख रहे विद्यार्थियों पर आधारित। DAU और D1/D7/D30 रिटेंशन के लिए प्रोडक्शन बैकएंड चाहिए (README देखें)।', 'Based on students visible on the leaderboard. DAU and D1/D7/D30 retention need the production backend (see README).')}</p></section>
+</main>`;
+}
+
+// Import / export of the question bank (JSON or CSV). Imported questions arrive as drafts for review.
+const CSV_COLS = ['id', 'subject', 'chapter', 'difficulty', 'question', 'A', 'B', 'C', 'D', 'answer', 'explanation', 'reference', 'question_en', 'A_en', 'B_en', 'C_en', 'D_en', 'explanation_en'];
+const csvCell = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+function bankCsv() {
+  return [CSV_COLS.join(','), ...M().qs.map(q => { const en = q.en || {}, eo = en.o || []; return [q.id, q.s, q.ch || '', q.d || 1, q.q, ...q.o, LETTERS[q.a], q.e || '', q.ref || '', en.q || '', eo[0] || '', eo[1] || '', eo[2] || '', eo[3] || '', en.e || ''].map(csvCell).join(','); })].join('\n');
+}
+function parseCsv(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(x => String(x).trim()));
+}
+// Accepts the app's JSON format (array of questions) or the CSV columns above. Returns {items, errors}.
+function parseImport(text) {
+  const t = String(text || '').trim(), items = [], errors = [];
+  let raw = [];
+  if (t.startsWith('[') || t.startsWith('{')) {
+    try { const j = JSON.parse(t); raw = Array.isArray(j) ? j : Array.isArray(j.questions) ? j.questions : []; } catch { errors.push(L('JSON पढ़ा नहीं जा सका।', 'Could not read the JSON.')); }
+  } else {
+    const rows = parseCsv(t), head = (rows.shift() || []).map(h => h.trim());
+    const col = k => head.indexOf(k);
+    raw = rows.map(r => { const g = k => (col(k) >= 0 ? String(r[col(k)] || '').trim() : ''); const a = 'ABCD'.indexOf(g('answer').toUpperCase());
+      return { id: g('id'), s: g('subject'), ch: g('chapter'), d: Number(g('difficulty')) || 1, q: g('question'), o: ['A', 'B', 'C', 'D'].map(g), a, e: g('explanation'), ref: g('reference'),
+        en: g('question_en') ? { q: g('question_en'), o: ['A_en', 'B_en', 'C_en', 'D_en'].map(g), e: g('explanation_en') } : undefined }; });
+  }
+  raw.forEach((x, i) => {
+    const q = { s: SUBJ[x.s] ? x.s : 'misc', ch: CHM[x.ch] ? x.ch : undefined, d: [1, 2, 3].includes(Number(x.d)) ? Number(x.d) : 1, t: String(x.t || ''), q: String(x.q || '').trim(), o: (Array.isArray(x.o) ? x.o : []).map(s => String(s || '').trim()), a: Number(x.a), e: String(x.e || '').trim(), ref: String(x.ref || '').trim() || undefined, en: x.en && x.en.q ? x.en : undefined, why: Array.isArray(x.why) ? x.why : undefined, ctx: x.ctx || undefined };
+    if (q.q.length < 8 || q.o.length !== 4 || q.o.some(s => !s) || !(q.a >= 0 && q.a <= 3)) errors.push(L(`पंक्ति ${i + 1}: प्रश्न, चार विकल्प और सही उत्तर (A–D) चाहिए।`, `Row ${i + 1}: a question, four options and the answer (A–D) are required.`));
+    else items.push({ ...q, id: x.id && /^[\w-]{2,40}$/.test(x.id) ? x.id : 'q' + rid() });
+  });
+  return { items: items.slice(0, 500), errors };
+}
+const IMP = { text: '', res: null };
+function vAdminIO() {
+  if (!P.isAdmin) return vNoAdmin();
+  const r = IMP.res;
+  return `${adminBar(L('आयात / निर्यात', 'Import / export'))}
+<main class="page gutter">
+  ${cmsNote()}
+  <section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('download')} ${L('निर्यात', 'Export')}</h2>
+    <p class="small muted" style="margin:0">${L(`पूरा प्रश्न बैंक (${M().qs.length} प्रश्न) — बैकअप या एक्सेल में संपादन के लिए।`, `The whole question bank (${M().qs.length} questions) — for backup or editing in a spreadsheet.`)}</p>
+    <div class="grid2"><button class="btn btn-outline" data-act="export" data-v="csv">CSV</button><button class="btn btn-outline" data-act="export" data-v="json">JSON</button></div></section>
+  <form class="card" data-form="import" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('plus')} ${L('आयात', 'Import')}</h2>
+    <p class="small muted" style="margin:0">${L('CSV (कॉलम: ', 'CSV (columns: ')}<code>${CSV_COLS.slice(0, 12).join(', ')}…</code>${L(') या JSON पेस्ट करें, या फ़ाइल चुनें। हर प्रश्न ड्राफ़्ट बनकर स्वचालित जाँच और मानव समीक्षा से गुज़रेगा।', ') or JSON, or choose a file. Every question becomes a draft and goes through automated checks and human review.')}</p>
+    <input type="file" id="imp-file" accept=".csv,.json,text/csv,application/json" class="input">
+    <textarea class="textarea" id="imp-text" data-bind="IMP.text" rows="6" placeholder="${L('यहाँ CSV या JSON पेस्ट करें', 'Paste CSV or JSON here')}">${esc(IMP.text)}</textarea>
+    ${r ? `<div class="note ${r.errors.length ? 'note-warn' : ''}">${ic(r.errors.length ? 'alert' : 'check')}<div>${L(`${r.items.length} मान्य प्रश्न`, `${r.items.length} valid questions`)}${r.errors.length ? `<br>${r.errors.slice(0, 5).map(esc).join('<br>')}` : ''}</div></div>` : ''}
+    <div class="grid2"><button class="btn btn-outline" type="button" data-act="import-check">${ic('shield')} ${L('जाँचें', 'Check')}</button><button class="btn btn-cta" type="submit" ${r && r.items.length ? '' : 'disabled'}>${ic('send')} ${L('समीक्षा में भेजें', 'Send to review')}</button></div></form>
+</main>`;
+}
+async function saveFile(name, text, type) {
+  if (P.downloads) { try { await P.downloads.save({ filename: name, data: new Blob([text], { type }) }); return; } catch (e) { if (e && e.code === 'not_granted') return; } }
+  try {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  } catch { copyText(text, L('फ़ाइल नहीं बन सकी — टेक्स्ट कॉपी हुआ', 'Could not create the file — the text was copied')); }
+}
+
+// Version history of published items (kept for editors in cms/history, or this browser in the demo).
+async function historyOf(id) {
+  if (P.cdb) { try { const s = await P.cdb.doc('cms/history/items/' + id).get(); return s.exists ? clone((s.data() || {}).v || []) : []; } catch { return []; } }
+  return (LS.get('cms.history', {}) || {})[id] || [];
+}
+async function pushHistory(id, data) {
+  const entry = { at: Date.now(), by: P.uid || 'local', data: clone(data) };
+  if (P.cdb) {
+    const ref = P.cdb.doc('cms/history/items/' + id), s = await ref.get().catch(() => null);
+    const v = s && s.exists ? clone((s.data() || {}).v || []) : [];
+    await ref.set({ v: [entry, ...v].slice(0, 10) });
+  } else { const all = LS.get('cms.history', {}) || {}; all[id] = [entry, ...(all[id] || [])].slice(0, 10); LS.set('cms.history', all); }
+}
+async function openHistory(id) {
+  const q = M().byId.get(id);
+  openSheet(`${sheetHead(`${ic('clock')} ${L('संस्करण इतिहास', 'Version history')}`)}<p class="small muted" style="margin:0">${esc(q ? q.q : id)}</p><div id="hist-box" class="list"><div class="empty">${L('लोड हो रहा है…', 'Loading…')}</div></div>`, { label: L('संस्करण इतिहास', 'Version history') });
+  const v = await historyOf(id), box = $('#hist-box');
+  if (!box) return;
+  box.innerHTML = v.length ? v.map((h, i) => `<div class="review-item"><b>${esc(String(h.data.q || h.data.title || h.data.t || '').slice(0, 120))}</b><span class="small muted">${relTime(h.at)} · ${L('उत्तर', 'Answer')}: ${esc((h.data.o || [])[h.data.a] || '—')}</span><div><button class="link" data-act="hist-restore" data-id="${esc(id)}" data-i="${i}">${ic('rotate')} ${L('इसे बहाल करें (समीक्षा के लिए)', 'Restore this (sends to review)')}</button></div></div>`).join('')
+    : `<div class="empty">${L('अभी कोई पिछला संस्करण नहीं। प्रकाशित बदलावों के बाद यहाँ पुराने संस्करण दिखेंगे।', 'No earlier versions yet. Older versions appear here after published changes.')}</div>`;
 }
 
 // ───────────────────────────── actions ─────────────────────────────
@@ -2301,7 +3052,7 @@ const ACTIONS = {
   'exam-submit-ask': () => openSheet(submitAskHtml(), { label: L('सबमिट करें', 'Submit') }),
   'exam-submit': () => submitExam(false),
   'exam-exit': () => openSheet(`${sheetHead(L('परीक्षा से बाहर जाएँ?', 'Leave the test?'))}<p style="margin:0">${L('परीक्षा जारी रहेगी और समय चलता रहेगा। आप "अभ्यास परीक्षा" से इसे फिर खोल सकते हैं।', 'The test stays open and the timer keeps running. You can reopen it from "Mock Tests".')}</p><div class="btnrow"><button class="btn btn-grey" data-act="exam-leave">${L('बाहर जाएँ', 'Leave')}</button><button class="btn btn-cta" data-act="exam-submit-ask">${L('सबमिट करें', 'Submit')}</button><button class="btn btn-outline" data-act="sheet-close">${L('जारी रखें', 'Continue')}</button></div>`, { label: L('परीक्षा से बाहर', 'Leave the test') }),
-  'exam-leave': () => { closeSheet(); nav('mock'); },
+  'exam-leave': () => { closeSheet(); nav((E && E.back) || 'mock'); },
   'bm-tab': el => { bmTab = el.dataset.v; render(); },
   'set-goal': el => { U.s.goal = Number(el.dataset.v); U.touch(); render(); },
   'set-scale': el => { U.s.set.scale = Number(el.dataset.v); U.touch(); applySettings(); render(); },
@@ -2387,7 +3138,7 @@ const ACTIONS = {
   'bank-edit': el => {
     const q = M().byId.get(el.dataset.id);
     if (!q || q.gen) return;
-    const orig = { id: q.id, s: q.s, t: q.t, q: q.q, o: q.o, a: q.a, e: q.e, d: q.d, ...(q.n ? { n: q.n } : {}), ...(q.day ? { day: q.day } : {}), ...(q.en ? { en: q.en } : {}) };
+    const orig = { id: q.id, s: q.s, t: q.t, q: q.q, o: q.o, a: q.a, e: q.e, d: q.d, ...(q.ch ? { ch: q.ch } : {}), ...(q.ex ? { ex: q.ex } : {}), ...(q.why ? { why: q.why } : {}), ...(q.ctx ? { ctx: q.ctx } : {}), ...(q.ref ? { ref: q.ref } : {}), ...(q.n ? { n: q.n } : {}), ...(q.day ? { day: q.day } : {}), ...(q.en ? { en: q.en } : {}) };
     openQEditor(orig, async edited => {
       try { await CMS.putDraft({ type: 'q', status: 'draft', origin: 'manual', note: L('संपादन', 'Edit'), data: { ...orig, ...edited, id: q.id } }); toast(L('संपादन समीक्षा कतार में भेजा गया', 'Edit sent to the review queue')); } catch (e) { toast(dbMsg(e), 'err'); }
     });
@@ -2565,27 +3316,214 @@ function updateApproveBtn(id, el) {
   if (el) { (reviewChecks[id] = reviewChecks[id] || [])[Number(el.dataset.ci)] = el.checked; }
   const boxes = $$(`input[data-chk="${CSS.escape(id)}"]`);
   const btn = document.getElementById('ap-' + id);
-  if (btn) btn.disabled = !boxes.every(b => b.checked);
+  if (btn) btn.disabled = btn.dataset.block === '1' || !boxes.every(b => b.checked);
 }
+
+// ───────────────────────────── v3 actions ─────────────────────────────
+const herePath = () => route + (routeArg ? '/' + routeArg : '');
+const chTitle = id => (CHM[id] ? [CHM[id].hi, CHM[id].en] : ['अध्याय', 'Chapter']);
+function practise(kind, title, list, opts = {}) {
+  const pool = diffPool(list).length ? diffPool(list) : list;
+  startSession(kind, title, pick(pool, opts.n || U.s.set.count || 10), { back: opts.back || herePath(), ch: opts.ch, timed: U.s.set.mode === 'timed' });
+}
+function reviewCard(id, known) {
+  const t = todayISO(), a = U.s.ans[id] || { c: 0, w: 0, b: 0 };
+  a.b = known ? Math.min(SRS_GAPS.length - 1, (a.b || 0) + 1) : 0;
+  a.l = known ? 1 : 0; a.due = addDays(t, SRS_GAPS[a.b]); a.fc = (a.fc || 0) + 1; a.t = Date.now();
+  U.s.ans[id] = a; U.touch();
+}
+function finishOnboarding() {
+  const name = String(onb.name || '').trim().slice(0, 40);
+  if (name) U.s.name = name;
+  U.s.exam = onb.exam || U.s.exam || 'gk';
+  U.s.goal = [10, 20, 30].includes(Number(onb.goal)) ? Number(onb.goal) : U.s.goal || 10;
+  U.s.onb = true; U.touch(); LB.queue();
+}
+Object.assign(ACTIONS, {
+  nav: el => go(el.dataset.to || 'home'),
+  'retry-load': () => { C.baseState = 'loading'; render(); loadBase(); },
+  'set-exam': el => { U.s.exam = el.dataset.v; learnState.ex = null; U.touch(); render(); },
+  resume: () => { if (!resumeSession()) toast(L('पिछला सत्र अब उपलब्ध नहीं है।', 'The previous session is no longer available.'), 'info'); },
+  'set-diff': el => { U.s.set.diff = Number(el.dataset.v) || 0; U.touch(); render(); },
+  'learn-ex': el => { learnState.ex = el.dataset.v; render(); },
+  'start-subject': el => { const k = el.dataset.s, sj = SUBJ[k]; practise('subject', [sj.name, sj.en], M().bySubj[k] || [], { back: 'subject/' + k }); },
+  'practice-ch': el => { const id = el.dataset.ch; practise('chapter', chTitle(id), M().byCh[id] || [], { ch: id, back: route === 'home' ? 'home' : 'chapter/' + id }); },
+  'practice-topic': el => {
+    const ch = el.dataset.ch, t = el.dataset.t || '', list = (M().byCh[ch] || []).filter(q => (q.t || '') === t);
+    const en = (list[0] && list[0].en && list[0].en.t) || t;
+    practise('topic', [t || chTitle(ch)[0], en || chTitle(ch)[1]], list.length ? list : M().byCh[ch] || [], { ch });
+  },
+  'practice-related': el => {
+    const q = (S && S.qs.find(x => x.id === el.dataset.id)) || M().byId.get(el.dataset.id);
+    if (!q) return;
+    const same = (M().byCh[chOf(q)] || []).filter(x => x.id !== q.id);
+    const topic = same.filter(x => (x.t || '') === (q.t || ''));
+    startSession('related', [`जुड़े प्रश्न: ${chTitle(chOf(q))[0]}`, `Related: ${chTitle(chOf(q))[1]}`], pick(topic.length >= 3 ? topic : same, 5), { back: (S && S.back) || 'learn', ch: chOf(q) });
+  },
+  'practice-mistakes': () => {
+    const m = M(), qs = Object.entries(U.s.ans).filter(([id, a]) => !a.l && m.byId.has(id)).sort((a, b) => (b[1].t || 0) - (a[1].t || 0)).slice(0, 20).map(([id]) => m.byId.get(id));
+    if (!qs.length) { toast(L('अभी कोई गलती नहीं — बढ़िया!', 'No mistakes to revisit — great!'), 'info'); return; }
+    startSession('revision', ['गलतियों का अभ्यास', 'Practise your mistakes'], shuffle(qs), { back: herePath() });
+  },
+  'open-q': el => { const q = M().byId.get(el.dataset.id); if (q) startSession('single', ['प्रश्न अभ्यास', 'Question practice'], [q], { back: herePath(), ch: chOf(q) }); },
+  'exam-pool': el => {
+    const m = M(), ch = el.dataset.ch, s = el.dataset.s;
+    const list = diffPool(ch ? m.byCh[ch] || [] : m.bySubj[s] || []);
+    const ids = pick(list, 20).map(q => q.id);
+    const title = ch ? chTitle(ch).map((x, i) => `${x} · ${i ? 'test' : 'टेस्ट'}`) : [`${SUBJ[s].name} · टेस्ट`, `${SUBJ[s].en} · test`];
+    startExamWith({ title, ids, mins: Math.max(5, Math.ceil(ids.length * 0.6)), pos: 1, neg: 0.25, back: herePath() });
+  },
+  'cards-start': el => { const src = el.dataset.src || 'due'; FC = { src, ids: deckFor(src), i: 0, flip: false, known: 0, forgot: 0 }; if (route === 'cards') { render(); window.scrollTo(0, 0); } else go('cards'); },
+  'card-flip': () => { if (FC) { FC.flip = true; render(); } },
+  'card-grade': el => {
+    if (!FC) return;
+    const known = el.dataset.v === '1', id = FC.ids[FC.i];
+    if (id) reviewCard(id, known);
+    if (known) FC.known++; else FC.forgot++;
+    FC.i++; FC.flip = false; render();
+  },
+  'start-wchal': () => { const wk = weekKey(todayISO()); startExamWith({ kind: 'wchal', id: 'wchal-' + wk, title: ['साप्ताहिक चुनौती', 'Weekly challenge'], ids: wchalIds(wk), mins: 10, pos: 1, neg: 0.25, seed: 'wchal:' + wk, meta: { wk }, back: 'compete' }); },
+  'friend-new': () => {
+    const m = M(), pool = exPool(m.qs, U.s.exam || 'gk');
+    startExamWith({ kind: 'friend', id: 'friend', title: ['दोस्त के लिए चुनौती', 'Challenge for a friend'], ids: shuffle(pool.length >= 10 ? pool : m.qs).slice(0, 10).map(q => q.id), mins: 5, pos: 1, neg: 0, back: 'compete', meta: { create: true } });
+  },
+  'friend-accept': el => {
+    const x = readChallenge(el.dataset.code);
+    if (!x) { toast(L('यह चुनौती कोड सही नहीं है।', 'This challenge code is not valid.'), 'err'); return; }
+    startExamWith({ kind: 'friend', id: 'friend', title: [`${x.n || 'दोस्त'} की चुनौती`, `${x.n || 'Friend'}'s challenge`], ids: x.ids, mins: 5, pos: 1, neg: 0, back: 'compete', meta: { opp: x } });
+  },
+  'friend-share': () => {
+    const R = lastExam;
+    if (!R || !R.ex) return;
+    const code = b64e({ v: 1, n: U.s.name.trim().split(/\s+/)[0] || LB.myName(), ids: R.ex.qs, sc: R.score, max: R.max, sec: R.timeSec });
+    shareText(challengeText(code, R));
+  },
+  'share-achv': () => {
+    const lv = levelOf(U.s.pts.total), got = BADGES.filter(b => U.s.badges[b.id]).map(b => L(b.hi, b.en));
+    shareText(L(`🏅 MY QUIZ पर मैं स्तर ${lv.lvl} पर हूँ — ${fmtNum(U.s.pts.total)} पॉइंट्स, ${U.streak()} दिन की स्ट्रीक। मेरे बैज: ${got.join(', ')}।`, `🏅 I'm at Level ${lv.lvl} on MY QUIZ — ${fmtNum(U.s.pts.total)} points and a ${U.streak()}-day streak. My badges: ${got.join(', ')}.`));
+  },
+  'exam-retake': () => { const x = lastExam && lastExam.ex; if (x) startExamWith({ id: x.id, kind: x.kind === 'wchal' ? 'wchal' : x.kind === 'friend' ? 'friend' : 'custom', title: x.title, ids: x.qs, mins: Math.max(1, Math.round((x.endsAt - x.startedAt) / 60000)), pos: x.pos, neg: x.neg, back: x.back, meta: x.meta, seed: x.kind === 'wchal' ? x.seed : undefined }); },
+  'ai-notes': el => aiNotes(el.dataset.ch),
+  'notes-ch': el => go('notes/' + el.dataset.ch),
+  print: () => { try { window.print(); } catch { toast(L('प्रिंट उपलब्ध नहीं है — टेक्स्ट कॉपी करें।', 'Printing is not available here — copy the text instead.'), 'info'); } },
+  'notes-copy': el => copyText(notesText(el.dataset.ch), L('नोट्स कॉपी हुए', 'Notes copied')),
+  'notes-copy-ai': () => { const b = $('#ai-notes'); if (b) copyText(b.textContent, L('नोट्स कॉपी हुए', 'Notes copied')); },
+  tutor: el => { const q = (S && S.qs.find(x => x.id === el.dataset.id)) || M().byId.get(el.dataset.id); if (q) openTutor(q); },
+  'tutor-ask': el => tutorAsk(el.dataset.v),
+  // onboarding
+  'wz-next': () => { if (WZ.step === 0) { const i = $('#wz-name'); if (i) onb.name = i.value; } WZ.step = Math.min(3, WZ.step + 1); render(); window.scrollTo(0, 0); },
+  'wz-back': () => { WZ.step = Math.max(0, WZ.step - 1); render(); },
+  'wz-exam': el => { onb.exam = el.dataset.v; render(); },
+  'wz-goal': el => { onb.goal = Number(el.dataset.v); render(); },
+  'wz-finish': () => { finishOnboarding(); go('home'); toast(L('आपकी योजना तैयार है — शुरू करें!', 'Your plan is ready — let\'s begin!')); },
+  'start-assess': () => { finishOnboarding(); startSession('assess', ['स्तर जाँच', 'Level check'], assessQuestions(), { back: 'home' }); },
+  'bld-s': el => { BLD.s = el.dataset.v; BLD.ch = ''; render(); },
+  'bld-d': el => { BLD.d = Number(el.dataset.v) || 0; render(); },
+  'bld-n': el => { BLD.n = Number(el.dataset.v) || 10; render(); },
+  'bld-mins': el => { BLD.mins = Number(el.dataset.v) || 10; render(); },
+  'bld-mk': el => { BLD.mk = Number(el.dataset.v) || 0; render(); },
+  'bld-start': () => {
+    const mk = MARKING[BLD.mk] || MARKING[0], ids = pick(builderPool(), BLD.n).map(q => q.id);
+    const name = BLD.ch ? chTitle(BLD.ch) : BLD.s ? [SUBJ[BLD.s].name, SUBJ[BLD.s].en] : ['मिश्रित', 'Mixed'];
+    startExamWith({ title: [`आपका टेस्ट: ${name[0]}`, `Your test: ${name[1]}`], ids, mins: BLD.mins, pos: mk[0], neg: mk[1], back: 'builder' });
+  },
+});
+Object.assign(CHANGES, { 'bld-ch': el => { BLD.ch = el.value; render(); } });
+Object.assign(FORMS, {
+  'challenge-code': f => {
+    const raw = String(($('#ch-code', f) || {}).value || '').trim();
+    const code = (raw.match(/challenge\/([A-Za-z0-9_-]+)/) || [])[1] || (raw.match(/[A-Za-z0-9_-]{24,}/) || [])[0] || '';
+    if (!code || !readChallenge(code)) { toast(L('यह चुनौती कोड सही नहीं है।', 'This challenge code is not valid.'), 'err'); return; }
+    go('challenge/' + code);
+  },
+  tutor: f => { const i = $('#tutor-in', f); const v = i ? i.value : ''; if (i) i.value = ''; tutorAsk(v); },
+});
+// Current affairs and Aaj ka Din (views in 10e-v3-daily.js)
+Object.assign(ACTIONS, {
+  'ca-tab': el => { caTab = el.dataset.v; render(); },
+  'ca-range-quiz': el => { const qs = caQs(caRange(el.dataset.v)); startSession('ca', el.dataset.v === 'week' ? ['साप्ताहिक करेंट अफेयर्स क्विज', 'Weekly current affairs quiz'] : ['मासिक करेंट अफेयर्स क्विज', 'Monthly current affairs quiz'], shuffle(qs).slice(0, 20), { back: 'ca' }); },
+  tts: el => { if (TTS.on) { stopSpeak(); return; } const n = M().newsById.get(el.dataset.id); if (n) speak(articleText(n)); },
+  'today-five': () => { const qs = todayFive(todayISO()).filter(Boolean); startSession('today5', ['आज का दिन · 5 प्रश्न', 'Today in History · 5 questions'], qs, { back: 'today' }); },
+  'bm-d': el => { const added = U.toggleBm('d', el.dataset.id); toast(added ? L('दिवस सहेजा गया', 'Day saved') : L('सहेजे गए दिवसों से हटाया गया', 'Removed from saved days')); render(); },
+  'share-day': el => { const d = M().days.find(x => x.id === el.dataset.id); if (d) shareText(`📅 ${fmtMD(d.md)} — ${dT(d)}\n${dH(d)}\n${dF(d).map(f => '• ' + f).join('\n')}\n— MY QUIZ ${L('आज का दिन', 'Today in History')}`); },
+});
+
+// ───────────────────────────── v3 admin actions ─────────────────────────────
+const lines2 = v => String(v || '').split('\n').map(s => s.trim()).filter(Boolean);
+Object.assign(FORMS, {
+  qedit: f => {
+    const g = id => (($('#' + id, f) || {}).value || '').trim();
+    const q = { s: g('qe-s'), d: Number(g('qe-d')) || 1, ch: g('qe-ch') || undefined, t: g('qe-t'), q: g('qe-q'), o: [0, 1, 2, 3].map(i => g('qe-o' + i)), a: Number((f.querySelector('input[name="qe-a"]:checked') || {}).value ?? -1), e: g('qe-e'),
+      why: [0, 1, 2, 3].map(i => g('qe-w' + i)), ctx: g('qe-ctx') || undefined, ref: g('qe-ref') || undefined, ex: $$('input[name="qe-ex"]:checked', f).map(i => i.value) };
+    if (!q.ex.length) delete q.ex;
+    if (q.a >= 0) q.why[q.a] = '';
+    if (!q.why.some(Boolean)) delete q.why;
+    const en = { q: g('qe-en-q'), o: [0, 1, 2, 3].map(i => g('qe-en-o' + i)), e: g('qe-en-e'), t: g('qe-en-t'), why: [0, 1, 2, 3].map(i => g('qe-en-w' + i)), ctx: g('qe-en-ctx') || undefined, ref: g('qe-en-ref') || undefined };
+    const anyEn = en.q || en.e || en.t || en.o.some(Boolean);
+    const err = q.q.length < 8 ? L('प्रश्न पूरा लिखें।', 'Write the full question.')
+      : q.o.some(o => !o) ? L('चारों विकल्प भरें।', 'Fill in all four options.')
+        : new Set(q.o).size !== 4 ? L('विकल्प अलग-अलग होने चाहिए।', 'The options must be different.')
+          : !(q.a >= 0 && q.a <= 3) ? L('सही विकल्प चुनें।', 'Select the right option.')
+            : q.e.length < 10 ? L('व्याख्या लिखें — इससे विद्यार्थी सीखते हैं।', 'Write an explanation: it is how students learn.')
+              : anyEn && (en.q.length < 8 || en.o.some(o => !o)) ? L('अंग्रेज़ी में प्रश्न और चारों विकल्प भरें, या अंग्रेज़ी भाग खाली छोड़ें।', 'Fill in the English question and all four options, or leave the English part empty.')
+                : anyEn && new Set(en.o).size !== 4 ? L('अंग्रेज़ी विकल्प अलग-अलग होने चाहिए।', 'The English options must be different.') : '';
+    if (err) { $('#qe-err', f).textContent = err; return; }
+    if (anyEn) { if (q.a >= 0) en.why[q.a] = ''; if (!en.why.some(Boolean)) delete en.why; q.en = en; } else q.en = undefined;
+    const cb = qEditCb; qEditCb = null; closeSheet(); if (cb) cb(q);
+  },
+  import: async f => {
+    const r = IMP.res || parseImport(IMP.text);
+    if (!r.items.length) { toast(L('आयात के लिए कोई मान्य प्रश्न नहीं।', 'No valid questions to import.'), 'err'); return; }
+    const btn = f.querySelector('button[type="submit"]'); btn.disabled = true;
+    let n = 0;
+    try { for (const q of r.items) { await CMS.putDraft({ type: 'q', status: 'draft', origin: 'import', note: L('आयात', 'Import'), data: clone(q) }); n++; } toast(L(`${n} प्रश्न समीक्षा कतार में भेजे गए`, `${n} questions sent to the review queue`)); IMP.text = ''; IMP.res = null; reviewTab = 'drafts'; go('admin-review'); }
+    catch (e) { btn.disabled = false; toast(dbMsg(e), 'err'); }
+  },
+});
+Object.assign(CHANGES, {
+  'qe-subj': el => { const sel = $('#qe-ch'); if (sel) sel.innerHTML = `<option value="">—</option>${CHAPTERS.filter(c => c.s === el.value).map(c => `<option value="${c.id}">${esc(L(c.hi, c.en))}</option>`).join('')}`; },
+});
+Object.assign(ACTIONS, {
+  export: el => {
+    const t = todayISO();
+    if (el.dataset.v === 'csv') saveFile(`myquiz-questions-${t}.csv`, '﻿' + bankCsv(), 'text/csv');
+    else saveFile(`myquiz-questions-${t}.json`, JSON.stringify(M().qs.map(q => { const x = clone(q); delete x.src; return x; }), null, 1), 'application/json');
+  },
+  'import-check': () => { const ta = $('#imp-text'); if (ta) IMP.text = ta.value; IMP.res = parseImport(IMP.text); render(); },
+  'bank-history': el => openHistory(el.dataset.id),
+  'hist-restore': async el => {
+    const v = await historyOf(el.dataset.id), h = v[Number(el.dataset.i)];
+    if (!h) return;
+    try { await CMS.putDraft({ type: h.data.q ? 'q' : h.data.title ? 'news' : 'day', status: 'draft', origin: 'manual', note: L('पुराना संस्करण', 'Older version'), data: { ...clone(h.data), id: el.dataset.id } }); closeSheet(); toast(L('पुराना संस्करण समीक्षा कतार में भेजा गया', 'The older version was sent to the review queue')); }
+    catch (e) { toast(dbMsg(e), 'err'); }
+  },
+  'cms-foureyes': async () => {
+    if (!P.owner && !LOCAL()) { toast(L('यह सेटिंग केवल ऐप का मालिक बदल सकता है।', 'Only the app owner can change this setting.'), 'info'); return; }
+    CMSSET.fourEyes = !CMSSET.fourEyes;
+    try { if (P.cdb) await P.cdb.doc('pub/settings/items/cms').set(clone(CMSSET)); else LS.set('cms.settings', CMSSET); toast(CMSSET.fourEyes ? L('अब दूसरे संपादक की मंज़ूरी ज़रूरी है', 'A second editor\'s approval is now required') : L('दूसरे संपादक की मंज़ूरी अब ज़रूरी नहीं', 'A second editor\'s approval is no longer required')); }
+    catch (e) { CMSSET.fourEyes = !CMSSET.fourEyes; toast(dbMsg(e), 'err'); }
+    render();
+  },
+});
 
 // ───────────────────────────── tester build (demo) ─────────────────────────────
 // Each case: g = group [hi, en]; t/do/exp in Hindi with tEn/doEn/expEn in English.
 const G = {
   start: ['होम और शुरुआत', 'Home and getting started'], quiz: ['क्विज', 'Quiz'], ca: ['करेंट अफेयर्स और आज का दिन', 'Current affairs and Today in History'],
   mock: ['अभ्यास परीक्षा (मॉक टेस्ट)', 'Mock tests'], prof: ['प्रोफ़ाइल और सेटिंग्स', 'Profile and settings'], admin: ['एडमिन पैनल', 'Admin panel'],
-  gen: ['सामान्य', 'General'], v2: ['नया: भाषा, पॉइंट्स और लीडरबोर्ड', 'New: language, points and leaderboard'],
+  gen: ['सामान्य', 'General'], v2: ['भाषा, पॉइंट्स और लीडरबोर्ड', 'Language, points and leaderboard'], v3: ['नया (v3): सीखने का पूरा अनुभव', 'New (v3): the full learning experience'],
 };
 const TESTS = [
-  { g: G.start, id: 'T01', to: 'home', t: 'नाम और लक्ष्य परीक्षा सहेजें', tEn: 'Save your name and target exam', do: 'होम पर “अपनी तैयारी को निजी बनाएँ” कार्ड में नाम लिखें, लक्ष्य परीक्षा और रोज़ का लक्ष्य चुनकर “सहेजें” दबाएँ।', doEn: 'On Home, in the “Make your preparation personal” card, type your name, pick a target exam and a daily goal, then tap “Save”.', exp: 'ऊपर “नमस्कार, आपका नाम!” दिखे, कार्ड हट जाए और प्रोफ़ाइल में नाम व परीक्षा दिखें।', expEn: '“Hello, your name!” shows at the top, the card goes away and Profile shows your name and exam.' },
+  { g: G.start, id: 'T01', to: 'welcome', t: "पहली बार: भाषा, परीक्षा और लक्ष्य", tEn: "First run: language, exam and goal", do: "ऐप पहली बार खोलें (या टेस्टर केंद्र से \"ऐप डेटा रीसेट करें\")। भाषा और नाम चुनें, लक्ष्य परीक्षा और रोज़ का लक्ष्य चुनें, फिर 5 प्रश्नों की स्तर जाँच दें या \"अभी छोड़ें\" दबाएँ।", doEn: "Open the app for the first time (or use \"Reset app data\" in the tester hub). Choose a language and name, a target exam and a daily goal, then take the 5-question level check or tap \"Skip for now\".", exp: "हर क़दम साफ़ समझ आए; स्तर जाँच के बाद \"आपका स्तर\" दिखे; होम पर नाम, परीक्षा और रोज़ का लक्ष्य दिखे।", expEn: "Every step is clear; after the level check \"Your level\" appears; Home shows your name, exam and daily goal." },
   { g: G.start, id: 'T02', to: 'home', t: 'दैनिक क्विज पूरा करें', tEn: 'Finish the daily quiz', do: 'होम पर “शुरू करें” दबाएँ और सभी 10 प्रश्न हल करें।', doEn: 'Tap “Start” on Home and answer all 10 questions.', exp: 'हर उत्तर पर सही/गलत रंग और व्याख्या दिखे; अंत में परिणाम आए; होम की रिंग में गिनती बढ़े और “दैनिक क्विज पूरा” लिखा आए।', expEn: 'Each answer shows right/wrong colours and an explanation; a result appears at the end; the ring on Home counts up and says the daily quiz is done.' },
   { g: G.start, id: 'T03', to: 'home', t: 'स्ट्रीक और सूचनाएँ', tEn: 'Streak and notifications', do: 'आज कम से कम 5 प्रश्न हल करें, फिर होम पर घंटी (सूचनाएँ) दबाकर हर सूचना खोलें।', doEn: 'Answer at least 5 questions today, then tap the bell (notifications) on Home and open each notification.', exp: '“1 दिन की स्ट्रीक” दिखे; हर सूचना सही स्क्रीन खोले।', expEn: '“1-day streak” shows; every notification opens the right screen.' },
-  { g: G.quiz, id: 'T04', to: 'quiz', t: 'विषय क्विज (अभ्यास मोड)', tEn: 'Subject quiz (practice mode)', do: '“क्विज” में कोई विषय चुनकर 10 प्रश्न हल करें; बीच में “पिछला प्रश्न” भी दबाएँ।', doEn: 'In “Quiz”, pick a subject and answer 10 questions; also tap “Previous” along the way.', exp: 'उसी विषय के प्रश्न आएँ; दिया गया उत्तर बदला न जा सके; विषय सूची में प्रगति और सटीकता अपडेट हो।', expEn: 'Questions are from that subject; a given answer cannot be changed; progress and accuracy update in the subject list.' },
-  { g: G.quiz, id: 'T05', to: 'quiz', t: 'समयबद्ध मोड', tEn: 'Timed mode', do: '“समयबद्ध” चुनें, कोई विषय शुरू करें और एक प्रश्न पर 30 सेकंड पूरे होने दें।', doEn: 'Choose “Timed”, start a subject and let 30 seconds run out on one question.', exp: 'टाइमर घटता दिखे और आख़िरी 10 सेकंड में लाल हो; समय ख़त्म होने पर “समय समाप्त!” और सही उत्तर दिखे।', expEn: 'The timer counts down and turns red in the last 10 seconds; when time runs out “Time is up!” and the right answer show.' },
-  { g: G.quiz, id: 'T06', to: 'bookmarks', t: 'बुकमार्क', tEn: 'Saved questions', do: 'क्विज में 2 प्रश्न “बुकमार्क” करें, फिर नीचे “बुकमार्क” टैब खोलें और “इन प्रश्नों का अभ्यास करें” दबाएँ।', doEn: 'Save 2 questions during a quiz, open the “Saved” tab at the bottom and tap “Practise these questions”.', exp: 'दोनों प्रश्न सूची में दिखें, “हटाएँ” काम करे और अभ्यास में वही प्रश्न आएँ।', expEn: 'Both questions are listed, “Remove” works and the practice uses those questions.' },
+  { g: G.quiz, id: 'T04', to: 'learn', t: "विषय → अध्याय → अभ्यास", tEn: "Subject → chapter → practice", do: "नीचे \"सीखें\" → कोई विषय → कोई अध्याय खोलें; \"अभ्यास\" से 10 प्रश्न हल करें; बीच में \"पिछला प्रश्न\" भी दबाएँ।", doEn: "Open \"Learn\" at the bottom → a subject → a chapter; practise 10 questions; also tap \"Previous\" along the way.", exp: "उसी अध्याय के प्रश्न आएँ; दिया गया उत्तर बदला न जा सके; अध्याय और विषय में पूरा % और महारत अपडेट हो।", expEn: "Questions are from that chapter; a given answer cannot be changed; the chapter and subject completion % and mastery update." },
+  { g: G.quiz, id: 'T05', to: 'subject/history', t: "समयबद्ध अभ्यास", tEn: "Timed practice", do: "किसी विषय/अध्याय में \"समयबद्ध · 30 से.\" चुनें, अभ्यास शुरू करें और एक प्रश्न पर 30 सेकंड पूरे होने दें।", doEn: "On a subject or chapter page choose \"Timed · 30s\", start practice and let 30 seconds run out on one question.", exp: "टाइमर घटता दिखे और आख़िरी 10 सेकंड में लाल हो; समय ख़त्म होने पर \"समय समाप्त!\" और सही उत्तर दिखे।", expEn: "The timer counts down and turns red in the last 10 seconds; when time runs out \"Time is up!\" and the right answer show." },
+  { g: G.quiz, id: 'T06', to: 'revise', t: "बुकमार्क", tEn: "Saved questions", do: "अभ्यास में 2 प्रश्न \"बुकमार्क\" करें, फिर \"सीखें\" → \"दोहराव\" → \"सहेजे गए\" खोलें और \"इन प्रश्नों का अभ्यास करें\" दबाएँ।", doEn: "Save 2 questions during practice, then open \"Learn\" → \"Revision\" → \"Saved\" and tap \"Practise these questions\".", exp: "दोनों प्रश्न सूची में दिखें, \"हटाएँ\" काम करे और अभ्यास में वही प्रश्न आएँ।", expEn: "Both questions are listed, \"Remove\" works and the practice uses those questions." },
   { g: G.quiz, id: 'T07', to: 'home', t: 'गलत प्रश्नों का दोहराव', tEn: 'Revise wrong answers', do: 'क्विज में जान-बूझकर 2–3 गलत उत्तर दें, फिर होम पर “प्रश्न दोहराव के लिए तैयार” कार्ड दबाएँ।', doEn: 'Answer 2–3 questions wrongly on purpose, then tap the “questions ready for revision” card on Home.', exp: 'वही गलत हुए प्रश्न दोबारा आएँ; सही करने पर कार्ड की गिनती घटे।', expEn: 'The same wrong questions come back; answering them right lowers the count.' },
-  { g: G.quiz, id: 'T08', to: 'quiz', t: 'प्रश्न खोज', tEn: 'Question search', do: 'क्विज स्क्रीन पर ऊपर दाएँ खोज आइकन दबाकर “संविधान” या “1857” लिखें और कोई परिणाम खोलें।', doEn: 'On the Quiz screen tap the search icon (top right), type “constitution” or “1857” and open a result.', exp: 'मिलते-जुलते प्रश्न दिखें और चुना गया प्रश्न खुल जाए।', expEn: 'Matching questions appear and the chosen one opens.' },
+  { g: G.quiz, id: 'T08', to: 'learn', t: "प्रश्न खोज", tEn: "Question search", do: "\"सीखें\" में ऊपर खोज बॉक्स दबाकर \"संविधान\" या \"1857\" लिखें और कोई परिणाम खोलें।", doEn: "In \"Learn\" tap the search box at the top, type \"constitution\" or \"1857\" and open a result.", exp: "मिलते-जुलते प्रश्न दिखें और चुना गया प्रश्न खुल जाए।", expEn: "Matching questions appear and the chosen one opens." },
   { g: G.quiz, id: 'T09', to: 'quiz', t: 'त्रुटि बताएँ और शेयर', tEn: 'Report error and share', do: 'किसी प्रश्न पर “त्रुटि बताएँ” से रिपोर्ट भेजें, फिर “शेयर” दबाएँ।', doEn: 'Send a report with “Report error” on a question, then tap “Share”.', exp: '“धन्यवाद” संदेश आए; रिपोर्ट एडमिन → “सामग्री की जाँच करें” → “त्रुटि रिपोर्ट” में दिखे; शेयर पर टेक्स्ट कॉपी या शेयर हो।', expEn: 'A thank-you message appears; the report shows in Admin → “Review content” → “Error reports”; Share copies or shares the text.' },
-  { g: G.ca, id: 'T10', to: 'ca', t: 'करेंट अफेयर्स', tEn: 'Current affairs', do: '“Current Affairs” खोलें, कोई श्रेणी चुनें, एक ख़बर खोलें, फिर “सहेजें” और “इस ख़बर से प्रश्न” आज़माएँ।', doEn: 'Open “Current Affairs”, choose a category, open a story, then try “Save” and “questions from this story”.', exp: 'फ़िल्टर सही ख़बरें दिखाए; ख़बर में मुख्य तथ्य और स्रोत लिंक हों; उसी ख़बर पर आधारित प्रश्न खुलें।', expEn: 'The filter shows the right stories; a story has key facts and a source link; its questions open.' },
+  { g: G.ca, id: 'T10', to: 'ca', t: "करेंट अफेयर्स लेख", tEn: "Current affairs article", do: "\"करेंट अफेयर्स\" खोलें; आज/सप्ताह/महीना/संग्रह टैब और खोज आज़माएँ; एक ख़बर खोलें, \"सुनें\", \"सहेजें\", \"PDF\" और \"इस ख़बर से प्रश्न\" आज़माएँ।", doEn: "Open \"Current affairs\"; try the Today/Week/Month/Archive tabs and search; open a story and try \"Listen\", \"Save\", \"PDF\" and its practice questions.", exp: "लेख में सारांश, विस्तार, क्यों महत्वपूर्ण, पृष्ठभूमि, परीक्षा तथ्य, योजनाएँ, संस्थाएँ और स्रोत लिंक हों; सुनने पर सही भाषा में आवाज़ आए; PDF पेज प्रिंट हो सके।", expEn: "The article has a summary, details, why it matters, background, exam facts, schemes, organisations and a source link; Listen reads it in the right language; the PDF page can be printed." },
   { g: G.ca, id: 'T11', to: 'ca', t: 'करेंट अफेयर्स क्विज', tEn: 'Current affairs quiz', do: 'Current Affairs में ऊपर “करेंट अफेयर्स क्विज” दबाकर पूरा करें।', doEn: 'In Current Affairs tap “Current affairs quiz” at the top and finish it.', exp: 'हाल की ख़बरों से प्रश्न आएँ और परिणाम में सही गिनती दिखे।', expEn: 'Questions come from recent news and the result shows the right count.' },
   { g: G.ca, id: 'T12', to: 'today', t: 'आज का दिन', tEn: 'Today in History', do: '“आज का दिन” खोलें; तीर से तारीख़ बदलें, ऊपर दाएँ सूची आइकन से कोई महीना चुनें, फिर “इस दिन से जुड़े प्रश्न देखें” दबाएँ।', doEn: 'Open “Today in History”; change the date with the arrows, pick a month from the list icon (top right), then tap “See questions about this day”.', exp: 'हर तारीख़ पर सही दिवस (या “कोई दिवस दर्ज नहीं”) दिखे; एक दिन में दो दिवस हों तो दोनों के बटन हों; प्रश्न उसी दिवस से जुड़े हों।', expEn: 'Each date shows the right day (or “no important day”); a date with two days shows a button for each; questions match that day.' },
   { g: G.mock, id: 'T13', to: 'mock', t: 'मॉक टेस्ट शुरू करें', tEn: 'Start a mock test', do: '“सामान्य ज्ञान मिनी मॉक – 1” शुरू करें; कुछ उत्तर दें, 2 प्रश्न “समीक्षा हेतु चिह्नित” करें और ऊपर दाएँ पैलेट से किसी प्रश्न पर जाएँ।', doEn: 'Start “General Knowledge Mini Mock – 1”; answer some questions, mark 2 for review and jump to a question from the palette (top right).', exp: 'टाइमर चले; पैलेट के रंग सही हों (हरा = उत्तर दिया, लाल = छोड़ा, बैंगनी = चिह्नित)।', expEn: 'The timer runs; palette colours are right (green = answered, red = not answered, purple = marked).' },
@@ -2599,10 +3537,21 @@ const TESTS = [
   { g: G.admin, id: 'T21', to: 'admin-ai', t: 'AI से प्रश्न बनवाएँ', tEn: 'Generate questions with AI', do: 'एडमिन → “AI से प्रश्न बनवाएँ” में कोई ख़बर चुनकर “प्रश्न बनाएँ” दबाएँ (अनुमति माँगी जाए तो दें)।', doEn: 'Admin → “Generate questions with AI”: choose a story and tap “Generate questions” (allow it if asked).', exp: 'कुछ सेकंड में हिंदी और English प्रश्न बनें, संपादित किए जा सकें और “समीक्षा में भेजें” से जाँच सूची में पहुँचें। AI उपलब्ध न हो तो इसे “छोड़ें”।', expEn: 'Within seconds Hindi + English questions appear, can be edited and reach the review list via “Send to review”. Skip this if AI is not available.' },
   { g: G.gen, id: 'T22', to: 'home', t: 'नेविगेशन और बैक बटन', tEn: 'Navigation and back button', do: 'अलग-अलग स्क्रीनों पर जाएँ; फ़ोन/ब्राउज़र का बैक बटन और ऐप का ← बटन दबाएँ।', doEn: 'Move between screens; use the phone/browser back button and the app\'s ← button.', exp: 'हर बार सही पिछली स्क्रीन खुले; कोई ख़ाली या अटकी स्क्रीन न दिखे।', expEn: 'The right previous screen opens every time; no blank or stuck screens.' },
   { g: G.gen, id: 'T23', to: 'home', t: 'भाषा और पढ़ने में आसानी', tEn: 'Language quality and readability', do: 'पूरे ऐप में हिंदी और English पाठ, मात्राएँ और वर्तनी ध्यान से देखें।', doEn: 'Read the Hindi and English text across the app carefully.', exp: 'कहीं टूटे अक्षर, गलत वर्तनी, गलत अनुवाद या तथ्य की गलती न हो। मिले तो “सामग्री में गलती” प्रकार से बग बताएँ।', expEn: 'No broken characters, spelling mistakes, wrong translations or factual errors. If you find one, report a bug of type “Content error”.' },
-  { g: G.v2, id: 'T24', to: 'profile', t: 'भाषा बदलें (हिंदी ⇄ English)', tEn: 'Switch language (Hindi ⇄ English)', do: 'प्रोफ़ाइल → सेटिंग्स में “English” चुनें; होम, क्विज, Current Affairs, आज का दिन, मॉक टेस्ट और लीडरबोर्ड देखें; फिर किसी प्रश्न पर ऊपर “हिं” बटन से वापस हिंदी करें; ऐप बंद करके दोबारा खोलें।', doEn: 'In Profile → Settings choose “English”; look at Home, Quiz, Current Affairs, Today in History, Mock Tests and the Leaderboard; then on a question switch back with the “हिं” button at the top; close and reopen the app.', exp: 'मेनू, बटन, प्रश्न, विकल्प, व्याख्या, ख़बरें और दिवस चुनी भाषा में दिखें; बीच क्विज में भाषा बदलने पर दिया गया उत्तर और पॉइंट्स बने रहें; दोबारा खोलने पर वही भाषा रहे।', expEn: 'Menus, buttons, questions, options, explanations, news and days appear in the chosen language; switching mid-quiz keeps your answers and points; the language is remembered after reopening.' },
+  { g: G.v2, id: 'T24', to: 'profile', t: "भाषा बदलें (हिंदी ⇄ English)", tEn: "Switch language (Hindi ⇄ English)", do: "ऊपर दाएँ अपनी प्रोफ़ाइल (गोल अक्षर) → सेटिंग्स में \"English\" चुनें; होम, सीखें, मुक़ाबला और प्रगति देखें; फिर किसी प्रश्न पर ऊपर \"हिं\" से हिंदी करें; ऐप बंद करके दोबारा खोलें।", doEn: "Tap your profile (the round letter, top right) → Settings → \"English\"; look at Home, Learn, Compete and Progress; then on a question switch back with \"हिं\" at the top; close and reopen the app.", exp: "पूरा ऐप चुनी भाषा में दिखे; बीच क्विज में भाषा बदलने पर उत्तर और पॉइंट्स बने रहें; दोबारा खोलने पर वही भाषा रहे।", expEn: "The whole app appears in the chosen language; switching mid-quiz keeps answers and points; the language is remembered after reopening." },
   { g: G.v2, id: 'T25', to: 'quiz', t: 'रिवॉर्ड पॉइंट्स', tEn: 'Reward points', do: 'एक क्विज खेलें और हर सही उत्तर पर “+10 पॉइंट्स” देखें; परिणाम में “इस राउंड के पॉइंट्स” देखें; फिर वही प्रश्न आज दोबारा हल करें; प्रोफ़ाइल में “रिवॉर्ड पॉइंट्स” और “इतिहास” खोलें।', doEn: 'Play a quiz and watch for “+10 points” on each right answer; check “Points this round” on the result; answer the same questions again today; open “Reward points” and “History” in Profile.', exp: 'पहली बार सही उत्तर पर +10 (समयबद्ध में +12), गलत पर +1, दैनिक क्विज पूरा करने पर +20 बोनस; उसी दिन दोबारा वही प्रश्न हल करने पर पॉइंट्स न मिलें; प्रोफ़ाइल का जोड़ और इतिहास सही हो।', expEn: '+10 for a first right answer (+12 in timed mode), +1 for a wrong one, +20 bonus for finishing the daily quiz; no points for repeating the same question the same day; Profile totals and history add up.' },
-  { g: G.v2, id: 'T26', to: 'leaders', t: 'लीडरबोर्ड', tEn: 'Leaderboard', do: 'नीचे “लीडरबोर्ड” टैब खोलें; “इस सप्ताह”, “पिछला सप्ताह”, “इस महीने” और “विजेता” देखें; किसी दूसरे नाम पर टैप करें; प्रोफ़ाइल में “दिखने वाला नाम” बदलें और “लीडरबोर्ड पर मेरा नाम दिखाएँ” बंद/चालू करें।', doEn: 'Open the “Leaderboard” tab at the bottom; look at “This week”, “Last week”, “This month” and “Winners”; tap another student\'s name; in Profile change the “Display name” and turn “Show my name on the leaderboard” off and on.', exp: 'आपकी पंक्ति हाइलाइट हो और पॉइंट्स प्रोफ़ाइल से मेल खाएँ; किसी नाम पर टैप करने से कोई प्रोफ़ाइल न खुले — सिर्फ़ नाम और पॉइंट्स दिखें; नया नाम लीडरबोर्ड पर दिखे; बंद करने पर आप सूची से हट जाएँ।', expEn: 'Your row is highlighted and matches your Profile points; tapping a name opens no profile (only names and points are shown); the new name shows on the board; turning it off removes you from the list.' },
+  { g: G.v2, id: 'T26', to: 'leaders', t: "लीडरबोर्ड", tEn: "Leaderboard", do: "\"मुक़ाबला\" → \"लीडरबोर्ड\" खोलें; \"इस सप्ताह\", \"पिछला सप्ताह\", \"इस महीने\" और \"विजेता\" देखें; किसी नाम पर टैप करें; प्रोफ़ाइल में \"दिखने वाला नाम\" बदलें और \"लीडरबोर्ड पर मेरा नाम दिखाएँ\" बंद/चालू करें।", doEn: "Open \"Compete\" → \"Leaderboard\"; look at \"This week\", \"Last week\", \"This month\" and \"Winners\"; tap a name; in Profile change the display name and turn \"Show my name on the leaderboard\" off and on.", exp: "आपकी पंक्ति हाइलाइट हो; किसी नाम पर टैप करने से कोई प्रोफ़ाइल न खुले; नया नाम लीडरबोर्ड पर दिखे; बंद करने पर आप सूची से हट जाएँ।", expEn: "Your row is highlighted; tapping a name opens no profile; the new name shows on the board; turning it off removes you from the list." },
   { g: G.v2, id: 'T27', to: 'admin-rewards', t: 'इनाम और विजेता (एडमिन)', tEn: 'Prizes and winners (admin)', do: 'एडमिन → “पुरस्कार और लीडरबोर्ड” में साप्ताहिक इनाम लिखकर सहेजें; “विजेता घोषित करें” दबाएँ; किसी नमूना नाम को “छिपाएँ” और फिर “फिर दिखाएँ”।', doEn: 'Admin → “Rewards & leaderboard”: write a weekly prize and save it; tap “Announce winners”; “Hide” a sample name, then “Show again”.', exp: 'इनाम लीडरबोर्ड पर दिखे; “विजेता” टैब में पिछले सप्ताह के टॉप नाम और पॉइंट्स आएँ; छिपाया नाम लीडरबोर्ड से हटे और “फिर दिखाएँ” से लौटे।', expEn: 'The prize shows on the leaderboard; the “Winners” tab lists last week\'s top names and points; a hidden name leaves the board and returns with “Show again”.' },
+  { g: G.v3, id: 'T28', to: 'home', t: "होम डैशबोर्ड", tEn: "Home dashboard", do: "होम पर \"आपका अगला क़दम\" कार्ड, \"यह सप्ताह\", \"पढ़ाई जारी रखें\", \"आपके लिए सुझाव\" और \"कमज़ोर विषय\" देखें; अगला क़दम वाला बटन दबाएँ।", doEn: "On Home look at \"Your next step\", \"This week\", \"Continue learning\", \"Recommended for you\" and \"Weak topics\"; tap the next-step button.", exp: "सबसे ज़रूरी काम सबसे ऊपर दिखे (जैसे दैनिक चुनौती, दोहराव या कमज़ोर विषय) और बटन सही जगह ले जाए; कोई बेकार या ख़ाली बटन न हो।", expEn: "The most useful action is at the top (daily challenge, revision or a weak topic) and the button goes to the right place; no dead or empty buttons." },
+  { g: G.v3, id: 'T29', to: 'chapter/h-free', t: "कठिनाई और परीक्षा फ़िल्टर", tEn: "Difficulty and exam filters", do: "\"सीखें\" में ऊपर परीक्षा चुनें (जैसे बैंकिंग) और देखें कि विषय बदलते हैं; किसी अध्याय में \"शुरुआती/मध्यम/उन्नत\" चुनें।", doEn: "In \"Learn\" pick an exam at the top (for example Banking) and see the subjects change; on a chapter choose Beginner/Intermediate/Advanced.", exp: "परीक्षा बदलने पर सूची बदले; कठिनाई चुनने पर प्रश्न बैंक और अभ्यास उसी स्तर के हों।", expEn: "The list changes with the exam; the question bank and practice follow the chosen level." },
+  { g: G.v3, id: 'T30', to: 'learn', t: "विस्तृत व्याख्या", tEn: "Detailed explanation", do: "किसी प्रश्न का उत्तर देकर व्याख्या पढ़ें; \"जुड़े प्रश्न\" दबाएँ।", doEn: "Answer a question and read the explanation; tap \"Related practice\".", exp: "सही उत्तर, बाकी विकल्प क्यों गलत हैं, पृष्ठभूमि, परीक्षा में उपयोगिता और स्रोत दिखें; तथ्य सही हों; जुड़े प्रश्न उसी विषय के हों।", expEn: "The correct answer, why each other option is wrong, background, exam relevance and source appear; facts are right; related questions are on the same topic." },
+  { g: G.v3, id: 'T31', to: 'revise', t: "दोहराव और फ़्लैशकार्ड", tEn: "Revision and flashcards", do: "\"सीखें\" → \"दोहराव\" खोलें; \"फ़्लैशकार्ड\" में \"उत्तर देखें\" और \"याद था/भूल गया\" दबाएँ; \"गलतियाँ\" से अभ्यास करें।", doEn: "Open \"Learn\" → \"Revision\"; in Flashcards tap \"Show answer\" and \"Knew it / Forgot\"; practise from \"Mistakes\".", exp: "कार्ड एक-एक करके आएँ और अंत में सारांश दिखे; गलत हुए प्रश्न \"गलतियाँ\" में मिलें।", expEn: "Cards come one by one with a summary at the end; wrongly answered questions appear under \"Mistakes\"." },
+  { g: G.v3, id: 'T32', to: 'builder', t: "अपना टेस्ट (परीक्षा मोड)", tEn: "Build your own test (exam mode)", do: "\"मुक़ाबला\" → \"अपना टेस्ट बनाएँ\": विषय, कठिनाई, 5 प्रश्न, समय और \"+2 / −0.5\" चुनकर टेस्ट दें; कुछ प्रश्न छोड़ें और सबमिट करें।", doEn: "\"Compete\" → \"Build your own test\": choose a subject, level, 5 questions, a time and \"+2 / −0.5\", take the test, skip some and submit.", exp: "टेस्ट के दौरान उत्तर न दिखें; परिणाम में अंक योजना के अनुसार स्कोर, विषयवार प्रदर्शन, समय विश्लेषण और समाधान हों।", expEn: "No answers are shown during the test; the result has the score with that marking, subject-wise performance, time analysis and solutions." },
+  { g: G.v3, id: 'T33', to: 'compete', t: "साप्ताहिक और दोस्त की चुनौती", tEn: "Weekly and friend challenges", do: "\"मुक़ाबला\" में साप्ताहिक चुनौती दें; फिर \"दोस्त को चुनौती दें\" → टेस्ट पूरा करके \"चुनौती भेजें\"; भेजा गया संदेश किसी दूसरे फ़ोन पर \"चुनौती कोड डालें\" में पेस्ट करें।", doEn: "In \"Compete\" take the weekly challenge; then \"Challenge a friend\" → finish the test → \"Send the challenge\"; paste the message on another phone under \"Enter a challenge code\".", exp: "साप्ताहिक का पहला स्कोर दर्ज हो और दोबारा देने पर \"अभ्यास\" लिखा आए; दोस्त को वही प्रश्न मिलें और अंत में दोनों स्कोर की तुलना दिखे।", expEn: "The first weekly score is recorded and a retake says \"practice\"; the friend gets the same questions and both scores are compared at the end." },
+  { g: G.v3, id: 'T34', to: 'today', t: "आज का दिन — दैनिक सत्र", tEn: "Today in History — daily session", do: "\"आज का दिन\" में कहानी और तथ्य पढ़ें, \"5 प्रश्न\" दें, दिवस \"सहेजें\" और \"शेयर\" करें; तीरों और कैलेंडर से दूसरी तारीख़ें देखें।", doEn: "In \"Today in History\" read the story and facts, take \"5 questions\", \"Save\" and \"Share\" the day; use the arrows and calendar to explore other dates.", exp: "सत्र पूरा होने पर \"आज का सत्र पूरा\" दिखे; सहेजा दिवस बुकमार्क के \"दिवस\" टैब में मिले; समय-रेखा और जयंतियाँ सही तारीख़ों पर हों।", expEn: "After the session it says the session is done; the saved day appears under the \"Days\" tab in Saved; the timeline and anniversaries match their dates." },
+  { g: G.v3, id: 'T35', to: 'progress', t: "प्रगति और उपलब्धियाँ", tEn: "Progress and achievements", do: "नीचे \"प्रगति\" खोलें: स्तर, सटीकता, प्रति प्रश्न समय, सप्ताह की तुलना, विषयवार महारत, कमज़ोर विषय, बैज और हाल के उत्तर देखें; \"उपलब्धि शेयर करें\" आज़माएँ।", doEn: "Open \"Progress\" at the bottom: check the level, accuracy, time per question, week comparison, subject mastery, weak topics, badges and recent answers; try \"Share achievements\".", exp: "आँकड़े आपके अभ्यास से मेल खाएँ (जैसे गलत उत्तर वाले विषय कमज़ोर विषयों में दिखें); बैज की शर्तें साफ़ लिखी हों।", expEn: "The numbers match your practice (for example, topics you got wrong show up as weak); badge conditions are clearly written." },
+  { g: G.v3, id: 'T36', to: 'admin-io', t: "एडमिन: जाँच, आयात/निर्यात, अनुवाद, इतिहास", tEn: "Admin: checks, import/export, translations, history", do: "एडमिन → \"आयात / निर्यात\" से CSV निर्यात करें और एक प्रश्न आयात करें; \"सामग्री की जाँच\" में \"स्वचालित जाँच\" देखें; \"अनुवाद प्रबंधन\" और \"विश्लेषण\" खोलें; प्रश्न बैंक में किसी प्रश्न का \"इतिहास\" देखें।", doEn: "Admin → \"Import / export\": export a CSV and import one question; in \"Review content\" look at \"Automated checks\"; open \"Translations\" and \"Analytics\"; in the question bank open a question's \"History\".", exp: "आयातित प्रश्न समीक्षा में आए और कमियाँ (जैसे अंग्रेज़ी नहीं) \"स्वचालित जाँच\" में दिखें; गंभीर गलती होने पर \"स्वीकृत करें\" बंद रहे; निर्यात फ़ाइल डाउनलोड हो।", expEn: "The imported question arrives in review with gaps (for example no English) flagged in \"Automated checks\"; \"Approve\" stays disabled on a blocking error; the export file downloads." },
+  { g: G.v3, id: 'T37', to: 'home', t: "ऑफ़लाइन और गलती की स्थिति", tEn: "Offline and error states", do: "ऐप खुला रहते फ़ोन का इंटरनेट बंद करें, कुछ प्रश्न हल करें और स्क्रीनें बदलें; फिर इंटरनेट चालू करें।", doEn: "With the app open, turn off mobile data/Wi-Fi, answer a few questions and move between screens; then turn the internet back on.", exp: "ऊपर \"आप ऑफ़लाइन हैं\" पट्टी दिखे पर अभ्यास चलता रहे; इंटरनेट लौटने पर \"आप फिर ऑनलाइन हैं\" दिखे और कुछ भी न खोए।", expEn: "An \"You are offline\" bar appears but practice keeps working; when the internet returns \"You are back online\" shows and nothing is lost." },
+  { g: G.v3, id: 'T38', to: 'learn', t: "AI ट्यूटर (यदि उपलब्ध)", tEn: "AI tutor (if available)", do: "किसी प्रश्न की व्याख्या में \"AI ट्यूटर से पूछें\" दबाएँ, एक त्वरित प्रश्न चुनें और अपना प्रश्न भी लिखें। (AI उपलब्ध न हो तो छोड़ें।)", doEn: "In a question's explanation tap \"Ask the AI tutor\", pick a quick prompt and type your own question. (Skip if AI is not available.)", exp: "उत्तर चुनी भाषा में, सरल और उसी प्रश्न से जुड़ा हो; गलत तथ्य न गढ़े; \"AI के उत्तर गलत भी हो सकते हैं\" सूचना दिखे।", expEn: "Answers are in the chosen language, simple and about that question; no invented facts; the \"AI answers can be wrong\" notice is shown." },
 ];
 const tcT = t => L(t.t, t.tEn), tcDo = t => L(t.do, t.doEn), tcExp = t => L(t.exp, t.expEn);
 const SEVS = [['critical', 'गंभीर', 'Critical', 'ऐप रुक गया, डेटा गया या आगे नहीं बढ़ सकते', 'App froze, data was lost or you cannot continue'], ['major', 'बड़ी', 'Major', 'कोई फ़ीचर काम नहीं करता', 'A feature does not work'], ['minor', 'छोटी', 'Minor', 'दिखावट या छोटी गड़बड़', 'Looks or a small glitch'], ['idea', 'सुझाव', 'Suggestion', 'सुधार का विचार', 'An idea for improvement']];
@@ -2610,7 +3559,7 @@ const BTYPES = [['bug', 'बग', 'Bug'], ['ui', 'डिज़ाइन / UI', '
 const SEV_EN = { critical: 'Critical', major: 'Major', minor: 'Minor', idea: 'Suggestion' };
 const TYPE_EN = { bug: 'Bug', ui: 'UI/Design', content: 'Content error', idea: 'Idea' };
 const SEV_CLS = { critical: 'sev-c', major: 'sev-ma', minor: 'sev-mi', idea: 'sev-s' };
-const ROUTE_LABEL = { home: ['होम', 'Home'], quiz: ['क्विज – विषय चुनें', 'Quiz: subjects'], play: ['प्रश्न स्क्रीन', 'Question screen'], result: ['परिणाम', 'Result'], ca: ['Current Affairs', 'Current Affairs'], today: ['आज का दिन', 'Today in History'], mock: ['अभ्यास परीक्षा', 'Mock Tests'], exam: ['मॉक परीक्षा', 'Mock exam'], 'exam-result': ['परीक्षा परिणाम', 'Test result'], bookmarks: ['बुकमार्क', 'Saved'], leaders: ['लीडरबोर्ड', 'Leaderboard'], profile: ['प्रोफ़ाइल', 'Profile'], admin: ['एडमिन डैशबोर्ड', 'Admin dashboard'], 'admin-ai': ['एडमिन · AI प्रश्न', 'Admin · AI questions'], 'admin-review': ['एडमिन · सामग्री की जाँच', 'Admin · Review'], 'admin-publish': ['एडमिन · प्रकाशन', 'Admin · Publish'], 'admin-bank': ['एडमिन · प्रश्न बैंक', 'Admin · Question bank'], 'admin-news': ['एडमिन · समाचार', 'Admin · News'], 'admin-days': ['एडमिन · आज का दिन', 'Admin · Important days'], 'admin-rewards': ['एडमिन · पुरस्कार', 'Admin · Rewards'], test: ['टेस्टर केंद्र', 'Tester hub'], 'test-inbox': ['टेस्टर इनबॉक्स', 'Tester inbox'] };
+const ROUTE_LABEL = { home: ['होम', 'Home'], quiz: ['क्विज – विषय चुनें', 'Quiz: subjects'], play: ['प्रश्न स्क्रीन', 'Question screen'], result: ['परिणाम', 'Result'], ca: ['Current Affairs', 'Current Affairs'], today: ['आज का दिन', 'Today in History'], mock: ['अभ्यास परीक्षा', 'Mock Tests'], exam: ['मॉक परीक्षा', 'Mock exam'], 'exam-result': ['परीक्षा परिणाम', 'Test result'], bookmarks: ['बुकमार्क', 'Saved'], leaders: ['लीडरबोर्ड', 'Leaderboard'], profile: ['प्रोफ़ाइल', 'Profile'], admin: ['एडमिन डैशबोर्ड', 'Admin dashboard'], 'admin-ai': ['एडमिन · AI प्रश्न', 'Admin · AI questions'], 'admin-review': ['एडमिन · सामग्री की जाँच', 'Admin · Review'], 'admin-publish': ['एडमिन · प्रकाशन', 'Admin · Publish'], 'admin-bank': ['एडमिन · प्रश्न बैंक', 'Admin · Question bank'], 'admin-news': ['एडमिन · समाचार', 'Admin · News'], 'admin-days': ['एडमिन · आज का दिन', 'Admin · Important days'], 'admin-rewards': ['एडमिन · पुरस्कार', 'Admin · Rewards'], welcome: ['पहली बार', 'First run'], learn: ['सीखें', 'Learn'], subject: ['विषय', 'Subject'], chapter: ['अध्याय', 'Chapter'], revise: ['दोहराव', 'Revision'], cards: ['फ़्लैशकार्ड', 'Flashcards'], compete: ['मुक़ाबला', 'Compete'], builder: ['टेस्ट बिल्डर', 'Test builder'], challenge: ['दोस्त की चुनौती', 'Friend challenge'], progress: ['प्रगति', 'Progress'], news: ['ख़बर', 'Article'], notes: ['नोट्स', 'Notes'], 'ca-notes': ['ख़बरों के नोट्स', 'News notes'], 'admin-translate': ['एडमिन · अनुवाद', 'Admin · Translations'], 'admin-analytics': ['एडमिन · विश्लेषण', 'Admin · Analytics'], 'admin-io': ['एडमिन · आयात/निर्यात', 'Admin · Import/export'], test: ['टेस्टर केंद्र', 'Tester hub'], 'test-inbox': ['टेस्टर इनबॉक्स', 'Tester inbox'] };
 const routeLabel = r => { const x = ROUTE_LABEL[r]; return x ? L(x[0], x[1]) : r; };
 const fmtStamp = ts => { const d = new Date(ts); return `${fmtDate(isoOf(d))}, ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const waLink = text => 'https://wa.me/?text=' + encodeURIComponent(text);
@@ -2879,20 +3828,29 @@ FORMS.bug = async f => {
 };
 
 // ───────────────────────────── router & render ─────────────────────────────
-const ROUTES = { home: vHome, quiz: vQuiz, play: vPlay, result: vResult, ca: vCA, today: vToday, mock: vMock, exam: vExam, 'exam-result': vExamResult, bookmarks: vBookmarks, leaders: vLeaders, profile: vProfile, admin: vAdmin, 'admin-ai': vAdminAI, 'admin-review': vAdminReview, 'admin-publish': vAdminPublish, 'admin-bank': vAdminBank, 'admin-news': vAdminNews, 'admin-days': vAdminDays, 'admin-rewards': vAdminRewards, test: vTest, 'test-inbox': vTestInbox };
-const NO_NAV = new Set(['play', 'result', 'exam', 'exam-result', 'test-inbox', ...ADMIN_ROUTES]);
-let route = 'home';
-const routeFromHash = () => { const h = decodeURIComponent(location.hash.replace(/^#/, '')); return ROUTES[h] ? h : 'home'; };
+const ROUTES = { home: vHome, welcome: vWelcome, learn: vLearn, quiz: vLearn, subject: vSubject, chapter: vChapter, revise: vRevise, cards: vCards, notes: vNotes, compete: vCompete, builder: vBuilder, challenge: vChallenge, progress: vProgress, news: vNews, 'ca-notes': vCaNotes, 'admin-translate': vAdminTranslate, 'admin-analytics': vAdminAnalytics, 'admin-io': vAdminIO, play: vPlay, result: vResult, ca: vCA, today: vToday, mock: vMock, exam: vExam, 'exam-result': vExamResult, bookmarks: vBookmarks, leaders: vLeaders, profile: vProfile, admin: vAdmin, 'admin-ai': vAdminAI, 'admin-review': vAdminReview, 'admin-publish': vAdminPublish, 'admin-bank': vAdminBank, 'admin-news': vAdminNews, 'admin-days': vAdminDays, 'admin-rewards': vAdminRewards, test: vTest, 'test-inbox': vTestInbox };
+const NO_NAV = new Set(['welcome', 'play', 'result', 'exam', 'exam-result', 'cards', 'notes', 'ca-notes', 'test-inbox', ...ADMIN_ROUTES]);
+// Routes look like #chapter/h-mod: the first part picks the screen, the rest is its argument.
+let route = 'home', routeArg = '';
+function parseRoute(h) {
+  h = String(h || '').replace(/^#/, '');
+  try { h = decodeURIComponent(h); } catch { /* keep as is */ }
+  const i = h.indexOf('/'), r = i < 0 ? h : h.slice(0, i), a = i < 0 ? '' : h.slice(i + 1);
+  return ROUTES[r] ? [r, a] : ['home', ''];
+}
+const routeFromHash = () => parseRoute(location.hash);
+function setRoute(r) { [route, routeArg] = parseRoute(r); }
 function go(r) {
-  if (!ROUTES[r]) r = 'home';
-  if (location.hash.replace(/^#/, '') === r) { route = r; render(true); return; }
+  r = String(r || 'home');
+  if (!ROUTES[r.split('/')[0]]) r = 'home';
+  if (location.hash.replace(/^#/, '') === r) { setRoute(r); render(true); return; }
   location.hash = r;
 }
 function redirect(r) {
-  setTimeout(() => { try { history.replaceState(null, '', '#' + r); } catch { /* ignore */ } route = r; render(true); }, 0);
+  setTimeout(() => { try { history.replaceState(null, '', '#' + r); } catch { /* ignore */ } setRoute(r); render(true); }, 0);
   return '<main class="page gutter"></main>';
 }
-window.addEventListener('hashchange', () => { route = routeFromHash(); if (DEMO) T.note('→' + route); closeSheet(); render(true); });
+window.addEventListener('hashchange', () => { stopSpeak(); setRoute(location.hash); if (DEMO) T.note('→' + route); closeSheet(); render(true); });
 
 let renderQueued = false, deferred = false, tickId = 0;
 function scheduleRender() {
@@ -2908,7 +3866,7 @@ function scheduleRender() {
 function render(routeChanged = false) {
   clearInterval(tickId); tickId = 0;
   const app = $('#app');
-  app.innerHTML = (ROUTES[route] || vHome)();
+  app.innerHTML = (navigator.onLine === false ? `<div class="offline" role="status">${ic('wifi-off')} ${L('आप ऑफ़लाइन हैं — अभ्यास जारी रखें, प्रगति बाद में सिंक होगी।', 'You are offline — keep practising; progress syncs later.')}</div>` : '') + (ROUTES[route] || vHome)();
   app.classList.toggle('no-nav', NO_NAV.has(route));
   app.classList.toggle('exam-pad', route === 'exam');
   if (routeChanged) window.scrollTo(0, 0);
@@ -2965,6 +3923,7 @@ document.addEventListener('submit', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q-search') renderSearch(t.value);
+  else if (t.id === 'ca-search') { caQuery = t.value; const box = $('#ca-feed'); if (box) box.innerHTML = caFeedHtml(); }
   else if (t.id === 'bank-search') { bankState.term = t.value; bankState.limit = 40; const box = $('#bank-list'); if (box) box.innerHTML = bankListHtml(); }
   if (t.dataset.bind) setBind(t.dataset.bind, t);
 });
@@ -2972,6 +3931,7 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.chk) updateApproveBtn(t.dataset.chk, t);
   if (t.id === 'mock-agree') { const b = $('#mock-start'); if (b) b.disabled = !t.checked; }
+  if (t.id === 'imp-file' && t.files && t.files[0]) { t.files[0].text().then(x => { IMP.text = x.slice(0, 2000000); IMP.res = parseImport(IMP.text); render(); }).catch(() => toast(L('फ़ाइल पढ़ी नहीं जा सकी।', 'Could not read the file.'), 'err')); }
   if (t.dataset.bind) setBind(t.dataset.bind, t);
   if (t.dataset.change && CHANGES[t.dataset.change]) CHANGES[t.dataset.change](t);
 });
@@ -2991,6 +3951,8 @@ document.addEventListener('keydown', e => {
   }
 });
 // Save right away when the app goes to the background, so the leaderboard never misses points.
+window.addEventListener('online', () => { render(); toast(L('आप फिर ऑनलाइन हैं', 'You are back online')); });
+window.addEventListener('offline', () => render());
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'hidden') return;
   clearTimeout(U.t); U.flush();
@@ -3010,14 +3972,16 @@ function boot() {
   const live = document.createElement('div');
   live.id = 'sr-live'; live.className = 'sr'; live.setAttribute('aria-live', 'assertive');
   document.body.appendChild(live);
-  route = routeFromHash();
-  if (LOCAL()) { loadLocalCms(); LB.loadLocal(); seedDemo(); }
+  setRoute(location.hash);
+  if (!U.s.onb && (route === 'home' || !location.hash)) { route = 'welcome'; try { history.replaceState(null, '', '#welcome'); } catch { /* ignore */ } }
+  if (LOCAL()) { loadLocalCms(); LB.loadLocal(); seedDemo(); Object.assign(CMSSET, LS.get('cms.settings', {}) || {}); }
   render(true);
   loadBase();
   initPlatform().then(() => {
     if (P.mode === 'artifact' && !P.demo) {
       subscribeLive(); subscribeCms(); LB.subscribe();
-      U.syncRemote().then(() => LB.queue());
+      try { P.cdb.doc('pub/settings/items/cms').onSnapshot(x => { if (x.exists) Object.assign(CMSSET, x.data() || {}); }, () => { /* optional */ }); } catch { /* optional */ }
+      U.syncRemote().then(() => { LB.queue(); if (route === 'welcome' && U.s.onb) go('home'); });
     }
     if (P.demo) { subscribeInbox(); T.push(); }
     scheduleRender();

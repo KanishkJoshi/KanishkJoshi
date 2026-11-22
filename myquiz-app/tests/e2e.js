@@ -15,18 +15,23 @@ const step = (msg) => console.log('•', msg);
   page.on('requestfailed', r => { if (!r.url().includes('fonts.g')) errors.push('requestfailed: ' + r.url()); });
 
   await page.goto(BASE + '#home', { waitUntil: 'networkidle' });
-  await page.waitForSelector('.tile');
+  await page.waitForSelector('.onb-page');
   await page.evaluate(() => document.fonts.ready);
-  const fontsOk = await page.evaluate(() => document.fonts.check('16px Mukta') && document.fonts.check('16px "Baloo 2"'));
+  const fontsOk = await page.evaluate(() => document.fonts.check('16px "Noto Sans"') && document.fonts.check('16px "Noto Sans Devanagari"'));
   step('fonts loaded: ' + fontsOk);
   await shot(page, '01-home');
 
-  // Onboarding
-  await page.fill('#onb-name', 'राहुल');
-  await page.click('[data-act="onb-exam"][data-v="SSC"]');
-  await page.click('form[data-form="onb"] button[type="submit"]');
-  await page.waitForTimeout(200);
-  step('greeting: ' + (await page.textContent('.greet')));
+  // Onboarding (first run): language + name → exam → daily goal → skip the level check
+  await page.fill('#wz-name', 'राहुल');
+  await page.click('[data-act="wz-next"]');
+  await page.click('[data-act="wz-exam"][data-v="ssc"]');
+  await page.click('[data-act="wz-next"]');
+  await page.click('[data-act="wz-goal"][data-v="10"]');
+  await page.click('[data-act="wz-next"]');
+  await shot(page, '01b-onboarding-level');
+  await page.click('[data-act="wz-finish"]');
+  await page.waitForSelector('.dash .next');
+  step('greeting: ' + (await page.textContent('.welcome')).replace(/\s+/g, ' ').trim());
 
   // Daily quiz: answer all 10 (alternate first/second option), check explanation + result
   await page.click('[data-act="start-daily"]');
@@ -45,7 +50,7 @@ const step = (msg) => console.log('•', msg);
   step('result: ' + (await page.textContent('.big-ring b')));
 
   // Subjects list
-  await page.goto(BASE + '#quiz'); await page.waitForSelector('[data-act="start-subject"]');
+  await page.goto(BASE + '#subject/history'); await page.waitForSelector('[data-act="start-subject"]');
   await shot(page, '05-subjects');
   await page.click('[data-act="set-mode"][data-v="timed"]');
   await page.click('[data-act="start-subject"][data-s="history"]');
@@ -71,10 +76,11 @@ const step = (msg) => console.log('•', msg);
   await page.goto(BASE + '#ca'); await page.waitForSelector('.news');
   await shot(page, '08-ca');
   await page.click('.news');
-  await page.waitForSelector('.sheet');
+  await page.waitForSelector('.article h1');
   await shot(page, '09-ca-detail');
-  await page.click('.sheet [data-act="bm-n"]');
-  await page.click('.sheet [data-act="news-quiz"]');
+  step('article sections: ' + (await page.$$eval('.art-sec h2', els => els.map(e => e.textContent.trim()).join(' | '))));
+  await page.click('.article [data-act="bm-n"]');
+  await page.click('[data-act="news-quiz"]');
   await page.waitForSelector('.qtext');
   step('news quiz title: ' + (await page.textContent('.appbar h1')));
 
@@ -119,11 +125,11 @@ const step = (msg) => console.log('•', msg);
   await page.goto(BASE + '#bookmarks'); await page.waitForSelector('.seg');
   step('bookmarks: ' + (await page.textContent('.seg')));
   await shot(page, '15-bookmarks');
-  await page.goto(BASE + '#profile'); await page.waitForSelector('.week');
+  await page.goto(BASE + '#progress'); await page.waitForSelector('.week');
   await shot(page, '16-profile');
 
   // Report an error on a question
-  await page.goto(BASE + '#quiz'); await page.click('[data-act="start-subject"][data-s="polity"]');
+  await page.goto(BASE + '#subject/polity'); await page.click('[data-act="start-subject"][data-s="polity"]');
   await page.waitForSelector('.qtext');
   await page.click('[data-act="report-q"]');
   await page.fill('#rp-note', 'परीक्षण रिपोर्ट');
@@ -171,8 +177,9 @@ const step = (msg) => console.log('•', msg);
 
   // Dark mode + large text
   await page.emulateMedia({ colorScheme: 'dark' });
-  await page.goto(BASE + '#home'); await page.waitForSelector('.tile');
+  await page.goto(BASE + '#home'); await page.waitForSelector('.dash .next');
   await shot(page, '21-home-dark');
+  await page.goto(BASE + '#compete'); await page.waitForSelector('[data-act="start-daily"]');
   await page.click('[data-act="start-daily"]'); await page.waitForSelector('.qtext');
   await (await page.$$('.opt'))[0].click(); await page.waitForSelector('.explain');
   await shot(page, '22-play-dark');

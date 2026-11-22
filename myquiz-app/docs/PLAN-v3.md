@@ -61,12 +61,12 @@ students without human review, readability over decoration.
 ## 3. Milestones (commit + push after each)
 
 - [x] M0 Repo setup: `src/` parts, `tools/build.py`, tests in `tests/`, this plan, restart scheduled for 05:40 IST
-- [ ] M1 Data: chapters, exam tags, difficulty labels; rich explanations (why-wrong, background, reference) for all questions
-- [ ] M2 Design system v3 + 4-tab navigation + Home dashboard + Learn (subject → chapter → topic) + onboarding
-- [ ] M3 Practice explanation panel, revision hub + flashcards, Progress analytics, Compete hub
-- [ ] M4 Exam builder + result analysis, weekly challenge, friend challenge, AI tutor
-- [ ] M5 Current affairs articles (+ TTS, PDF notes, daily/weekly/monthly), Aaj ka Din daily session
-- [ ] M6 Admin CMS upgrades (quality checks, tagging, translations, history, import/export, analytics)
+- [x] M1 Data: chapters, exam tags, difficulty labels; rich explanations (why-wrong, background, reference) for all questions
+- [x] M2 Design system v3 + 4-tab navigation + Home dashboard + Learn (subject → chapter → topic) + onboarding
+- [x] M3 Practice explanation panel, revision hub + flashcards, Progress analytics, Compete hub
+- [x] M4 Exam builder + result analysis, weekly challenge, friend challenge, AI tutor
+- [x] M5 Current affairs articles (+ TTS, PDF notes, daily/weekly/monthly), Aaj ka Din daily session
+- [x] M6 Admin CMS upgrades (quality checks, tagging, translations, history, import/export, analytics)
 - [ ] M7 UX states (offline, retry), accessibility pass, tests, publish both artifacts, README, summary
 
 ## 4. How to continue (for a fresh session)
@@ -82,3 +82,5 @@ https://claude.ai/artifact/TYUHLNaspNcibKAUdXz7DY with `files` = data/*.json (ke
 
 ## 5. Progress log
 - 01:15 IST — M0 done.
+- Overnight — M1 done and pushed; the session paused (usage limit) during M2.
+- 05:41 IST — resumed after the reset; M2–M6 code complete, suites passing except fixes in progress.

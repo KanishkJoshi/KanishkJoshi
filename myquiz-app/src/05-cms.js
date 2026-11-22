@@ -3,7 +3,7 @@ const CMS = {
   saveLocal() { LS.set('cms.pub', C.pub); LS.set('cms.drafts', C.drafts); LS.set('cms.reports', C.reports); },
   async putDraft(d) {
     const now = Date.now();
-    const doc = clone({ ...d, id: d.id || rid(), createdAt: d.createdAt || now, updatedAt: now });
+    const doc = clone({ ...d, id: d.id || rid(), by: d.by || P.uid || 'local', createdAt: d.createdAt || now, updatedAt: now });
     if (P.cdb) await P.cdb.doc(`cms/drafts/items/${doc.id}`).set(doc);
     else { const i = C.drafts.findIndex(x => x.id === doc.id); if (i >= 0) C.drafts[i] = doc; else C.drafts.push(doc); this.saveLocal(); bump(); }
     return doc;
@@ -18,7 +18,9 @@ const CMS = {
     else { const arr = C.pub[coll]; const i = arr.findIndex(x => x.id === doc.id); if (i >= 0) arr[i] = doc; else arr.push(doc); this.saveLocal(); bump(); }
   },
   async publish(d, publishAt) {
-    const coll = COLL[d.type];
+    const coll = COLL[d.type], id = d.data.id || 'x' + d.id;
+    const prev = (C.pub[coll] || []).find(x => x.id === id) || (C.base[coll] || []).find(x => x.id === id);
+    if (prev && !prev.hidden) { try { await pushHistory(id, prev); } catch { /* history is best-effort */ } }
     await this.putPub(coll, { ...d.data, id: d.data.id || 'x' + d.id, publishAt, publishedAt: Date.now() });
     await this.delDraft(d.id);
   },

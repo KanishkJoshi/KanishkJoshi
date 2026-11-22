@@ -1,15 +1,27 @@
-# MY QUIZ — Hindi + English GK quiz app (v2)
+# MY QUIZ — bilingual GK learning app (v3)
 
-A mobile-first, installable web app (PWA) built from the MY QUIZ design. It covers the six designed screens, plus the screens the design implies but doesn't show: mock-test engine, results, bookmarks and profile.
+A mobile-first, installable web app (PWA) for Indian competitive-exam students, built from the MY QUIZ design and grown
+into a personalised learning app around **Learn → Practise → Understand → Revise → Compete → Improve**.
 
-**New in v2:** the whole app and all content in **हिंदी or English** (switch in Profile → Settings, or the हिं/EN button on any question), **reward points** for every quiz, **weekly and monthly leaderboards** with prizes, winner announcements and badges. Students see only names and points, never another student's profile.
-
-The admin panel has a real pipeline. AI drafts questions from a source text, a human reviews them against a checklist, and only then are they published to learners.
+**v3 (22 Nov 2026)** follows the owner's 20-section improvement brief. The analysis, priorities and status are in
+[docs/PLAN-v3.md](docs/PLAN-v3.md).
+- **Navigation:** four sections (Home · Learn · Compete · Progress), with profile, settings and notifications in the top bar.
+- **Home:** a personalised dashboard that puts one "next step" first.
+- **Learn:** subject → chapter → topic, difficulty levels and exam filters.
+- **Explanations:** why each wrong option is wrong, background, exam relevance and source.
+- **Revision:** spaced repetition with flashcards.
+- **Compete:** custom tests with negative marking, weekly challenges and friend challenges.
+- **Progress:** analytics for accuracy, time, mastery and weak topics.
+- **Onboarding:** first-run setup with a level check.
+- **Current affairs:** articles with listen-aloud and PDF notes.
+- **Aaj ka Din:** a 3–5 minute daily session.
+- **AI tutor:** answers grounded in the verified explanation.
+- **Admin CMS:** quality checks, duplicate detection, tagging, translations, version history, import/export and analytics.
 
 - **Live demo** (claude.ai artifact; private until you share it from its Share menu): https://claude.ai/artifact/7nKiG4QDwQbLCMCWm91XfR
 - **Design review, competitor references and roadmap**: https://claude.ai/artifact/WAhSbCYv6oe3Le5PULqniZ
 - **Tester build (demo)** to share with testers: https://claude.ai/artifact/TYUHLNaspNcibKAUdXz7DY (see [Tester build](#tester-build-demo))
-- Everything in this folder runs as-is on any static host, with no build step and no framework.
+- Everything in this folder runs as-is on any static host and no framework is needed. `app.js` is assembled from `src/*.js` by `python3 tools/build.py`; run that after editing anything in `src/`.
 
 ## Run it locally
 
@@ -24,30 +36,32 @@ Deploy by copying the folder to any static host (GitHub Pages, Netlify, Firebase
 
 ## What's in the app
 
-| Area | Route | What works |
+| Section | Routes | What works |
 |---|---|---|
-| Home (होम) | `#home` | Greeting with the learner's name, daily goal ring, streak, daily quiz (10 Q: latest current affairs + today's day + unseen bank questions), 4 section tiles, "revise your mistakes" card, today's topic chips, latest news, notifications |
-| Quiz – विषय चुनें | `#quiz` | 8 subjects with real counts, per-subject progress and accuracy, practice vs timed mode (30 s/Q), 10/20/all questions, search across the bank |
-| Question player | `#play` | Instant right/wrong feedback, explanation, **"AI से और समझें"** (Claude explains, when available), bookmark, share, report an error, keyboard shortcuts (1–4 / A–D, ←/→), answer options shuffled per sitting |
-| Results | `#result` | Score ring, accuracy, time, **points earned with a breakdown** (questions, daily quiz, goal, streak), retry wrong/skipped, full answer review, share score |
-| Current Affairs | `#ca` | Date-grouped feed, category filter, detail sheet with exam one-liners and source link, quiz from a single news item, CA quiz, bookmark |
-| आज का दिन | `#today` | Today's observance(s) with history, purpose and facts; previous/next day, month calendar, upcoming days; questions auto-generated from the calendar |
-| अभ्यास परीक्षा (mock) | `#mock`, `#exam` | Exam-style UI: countdown, question palette, mark for review, clear response, negative marking, auto-submit at time-up, resume after leaving |
-| Mock result | `#exam-result` | Score with negative marking, points earned, subject-wise bars, full solutions |
-| Bookmarks | `#bookmarks` | Saved questions (practise them as a set) and saved news |
-| Leaderboard | `#leaders` | This week / last week / this month / winners. Podium for the top 3, your rank and points, prize banner, countdown to the reset. Rows are plain text: no profile links |
-| Profile | `#profile` | Name, target exam, daily goal, **reward points** (today, week, month, history), **badges**, stats, 7-day activity chart, subject mastery, **language**, font size, theme, **leaderboard display name and show/hide**, reset |
-| Admin | `#admin…` | Dashboard, news manager (with AI fill from a pasted article), important-days manager, **AI question generator** (writes Hindi + English), review queue with mandatory checklist, learner error reports, question bank (edit/hide built-in questions, optional English fields), scheduled publishing |
-| Admin: rewards | `#admin-rewards` | Weekly/monthly prize text (Hindi + English), **announce last week's / last month's winners** (top 10 frozen into the Winners tab), hide inappropriate names, points rules |
+| First run | `#welcome` | Language → exam (UPSC, SSC CGL, Banking, Railway, State PSC, NDA/CDS, School & college, GK) → daily goal → optional 5-question level check → personal plan |
+| **Home** | `#home` | Greeting, exam and goal; one **next step** (resume, daily challenge, due revision, weak topic or next chapter) with the goal ring and streak; this week's bars, accuracy, points and rank; continue learning; recommendations; weak topics; today's current affairs and Aaj ka Din |
+| **Learn** | `#learn`, `#subject/<id>`, `#chapter/<id>` | 8 subjects → chapters → topics, each with completion %, accuracy and a mastery level. Filter by exam and by difficulty (beginner/intermediate/advanced). Practice mode (instant feedback) or exam mode (timed, answers at the end). Topic-wise question bank with attempt status, flashcards, AI notes and printable notes, search |
+| Practice | `#play` | Instant right/wrong with icons and text (not colour alone). The explanation covers the correct answer, why every other option is wrong, background, exam relevance, difficulty and the source. Also: related practice, "Explain more with AI", the **AI tutor** chat, bookmark, report, share, Hindi/English switch, timed mode, keyboard shortcuts |
+| Revision | `#revise`, `#cards`, `#bookmarks` | Spaced repetition (1/3/7/14/30 days) with due-today sessions, flashcards (self-graded, update the schedule), mistakes collection, saved questions/news/days, chapter mastery summary, weak-topic revision |
+| Current affairs | `#ca`, `#news/<id>`, `#ca-notes/<scope>` | Today / Week / Month / Archive / Saved views, search and category filters. Articles have a summary, details, why it matters, background, exam facts, related schemes and organisations, the source link, practice questions, listen (text-to-speech), save, share and PDF notes. Weekly and monthly revision quizzes and notes |
+| Aaj ka Din | `#today` | A 3–5 minute session: read the story → 5-question challenge → flashcards. Also purpose and facts, anniversaries around the date, the month's timeline, the coming days, a calendar, save and share |
+| **Compete** | `#compete`, `#mock`, `#exam`, `#builder`, `#challenge/<code>`, `#leaders` | Daily challenge; **weekly challenge** (same 15 questions for everyone, first attempt counts); mock tests; **test builder** (subject, chapter, level, count, time, marking +1/0, +1/−¼, +1/−⅓, +2/−½); **friend challenges** by link or code; weekly/monthly leaderboards and winners. Exam mode has a palette, mark for review, skip, previous/next, submit confirmation, auto-submit, and subject-wise, accuracy and time analysis |
+| **Progress** | `#progress` | Level and points, answers, accuracy, seconds per question, streaks, this week vs last week, subject mastery, weak topics, test trend, 11 achievements (shareable), recent answer history |
+| Profile & settings | `#profile` | Name, exam, daily goal, language, text size, theme, leaderboard name and visibility, reset |
+| Admin | `#admin…` | AI questions (Hindi + English) → **automated checks** (options, answer, duplicates, answer present in source, translation, tags, notes, reference) → human checklist → publish. Also: tagging (chapter, exam, difficulty), wrong-option notes, background and reference in the editor; **translation queue**; **version history** with restore; **import/export** (CSV/JSON → drafts); **analytics**; an option for a second editor's approval; news, days, rewards, reports |
 
 ## How the code is organised
 
 ```
 myquiz-app/
-├── index.html            styles (design tokens, light + dark), icon sprite, app shell
-├── app.js                the whole app: content store, progress, quiz/exam engines, views, admin CMS
-├── data/questions.json   95 hand-written, fact-checked questions with explanations (Hindi + `en`)
-├── data/news.json        8 real current-affairs items (Sep–Nov 2026), each with a source URL (Hindi + `en`)
+├── index.html            styles (design system v3 tokens, light + dark), icon sprite, app shell
+├── app.js                the built app (do not edit by hand) — assembled from src/
+├── src/                  01-constants … 14-router-boot: content store, progress, engines, views, admin, tester
+├── tools/                build.py, build_artifact.py, content/ (scripts that enriched the question and news data)
+├── tests/                run-all.sh + Playwright suites (standalone, artifact mock, tester build, v2/v3 features, smoke)
+├── docs/PLAN-v3.md       analysis, priorities and status of the v3 brief
+├── data/questions.json   95 questions: chapter, difficulty, explanation, why each wrong option is wrong, background, reference (Hindi + `en`)
+├── data/news.json        8 real current-affairs items (Sep–Nov 2026) with source, details, why it matters, background, schemes, organisations (Hindi + `en`)
 ├── data/days.json        95 important days across the year: history, purpose, exam facts (Hindi + `en`)
 ├── manifest.webmanifest  install metadata
 ├── sw.js                 offline cache (app shell, content, fonts)
@@ -136,6 +150,19 @@ The same code has a tester mode for QA. It's switched on by `window.MYQUIZ_CONFI
 1. **Accounts and sync**: phone-OTP login (Firebase Auth or Supabase), with the same data model as the artifact version above.
 2. **Leaderboard you can pay prizes on**: in this prototype points are counted on the learner's device, which is fine for engagement but can be faked by a determined user. Before giving real money or vouchers, move scoring to the server: the app sends each answer to a Cloud Function that checks it against the answer key and updates `lb/{uid}` (Firestore rules: learners read `lb`, nobody writes it directly). A scheduled function every Monday 00:00 IST (and on the 1st of each month) freezes the winners.
 3. **Server-side AI**: a Cloud Function that calls your LLM with the same prompt and validation. Store source, prompt, output, reviewer and decision for audit.
-4. **Notifications**: a daily reminder at a time the learner picks (web push / FCM), plus an evening "streak at risk" nudge and a Monday "winners announced" message.
+4. **Notifications**: a daily reminder at a time the learner picks (web push / FCM), plus an evening "streak at risk" nudge and a Monday "winners announced" message. (Today the app shows due revision and challenges in-app on Home and in the bell.)
 5. **Android**: ship this PWA as a Trusted Web Activity on Play Store now; move to Flutter/React Native only if you need deeper native features.
 6. **Analytics**: track D1/D7/D30 retention, daily-quiz completion, streak length, and mock-to-paid conversion.
+
+## Not built yet (needs accounts and a server)
+
+These parts of the brief are deliberately not faked in the UI. They need the production backend above:
+- **Social:** friend lists, live private quiz rooms, communities and moderated chat (with age-appropriate safety controls). Friend challenges already work today through a link or code.
+- **Monetisation (freemium):**
+  - Free: daily quiz, basic banks, Aaj ka Din, limited current affairs, basic progress.
+  - Premium: full banks, advanced mocks, complete notes, advanced analytics, smart revision, AI tutor, downloads.
+  - Payments and entitlement checks belong on the server (for example Razorpay with Firebase custom claims).
+  - No ads during exams, questions or explanations.
+- **Product analytics:** DAU, D1/D7/D30 retention, completion and revision rates, accuracy improvement, crash-free sessions and referrals. These need an event pipeline (for example Firebase Analytics or BigQuery). The admin Analytics screen shows content quality and leaderboard activity today.
+- **Regional languages:** every string is a Hindi/English pair today. The next step is moving the pairs into per-language files (`hi`, `en`, then `mr`, `bn` …).
+

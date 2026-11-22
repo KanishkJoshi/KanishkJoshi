@@ -2,7 +2,7 @@
 const { chromium } = require('playwright');
 const BASE = process.env.BASE || 'http://127.0.0.1:8765/';
 const SHOTS = process.argv[3] || '';
-const routes = ['home', 'quiz', 'ca', 'today', 'mock', 'bookmarks', 'leaders', 'profile', 'admin', 'admin-ai', 'admin-review', 'admin-publish', 'admin-bank', 'admin-news', 'admin-days', 'admin-rewards'];
+const routes = ['home', 'learn', 'subject/history', 'chapter/h-mod', 'chapter/d-intl', 'revise', 'cards', 'compete', 'builder', 'challenge', 'progress', 'notes/p-rights', 'news/n2611-isa', 'ca-notes/week', 'ca', 'admin-translate', 'admin-analytics', 'admin-io', 'today', 'mock', 'bookmarks', 'leaders', 'profile', 'welcome', 'admin', 'admin-ai', 'admin-review', 'admin-publish', 'admin-bank', 'admin-news', 'admin-days', 'admin-rewards'];
 (async () => {
   const browser = await chromium.launch();
   let problems = 0;
@@ -15,7 +15,7 @@ const routes = ['home', 'quiz', 'ca', 'today', 'mock', 'bookmarks', 'leaders', '
       page.on('console', m => { if (m.type() === 'error' && !/fonts\.g/.test(m.text())) errs.push('console: ' + m.text()); });
       await page.addInitScript(l => { try { localStorage.setItem('mq.progress', JSON.stringify({ v: 2, name: 'Asha', set: { lang: l, scale: 1, theme: 'system', mode: 'practice', count: 10 }, updatedAt: 1 })); } catch {} }, lang);
       await page.goto(BASE + '#home');
-      await page.waitForSelector('.tiles .tile');
+      await page.waitForSelector('.dash .next');
       for (const r of routes) {
         await page.evaluate(r => { location.hash = r; }, r);
         await page.waitForTimeout(250);

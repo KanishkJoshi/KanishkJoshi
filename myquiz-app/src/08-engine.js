@@ -78,6 +78,7 @@ function finishSession() {
   if (!S) return;
   S.done = true; S.endedAt = Date.now();
   LS.del('sess');
+  if (S.kind === 'today5') { U.s.t5[todayISO()] = S.qs.filter(q => S.ans[q.id] && S.ans[q.id].ok).length; U.touch(); }
   if (S.kind === 'assess') {
     const ok = S.qs.filter(q => S.ans[q.id] && S.ans[q.id].ok).length;
     U.s.level = pct(ok, S.qs.length); U.s.onb = true; U.touch();

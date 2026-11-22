@@ -3,7 +3,7 @@ const typeLabel = t => { const x = TYPE_LABEL[t === 'days' ? 'day' : t]; return 
 function vNoAdmin() {
   return `${appbar(L('एडमिन पैनल', 'Admin panel'), { back: 'profile' })}<main class="page gutter"><div class="card">${emptyState('lock', L('यह भाग केवल संपादकों के लिए है', 'This area is for editors only'), P.ready ? L('सामग्री जोड़ने या प्रकाशित करने के लिए इस ऐप के संपादक से पहुँच माँगें।', 'Ask an editor of this app for access to add or publish content.') : L('आपकी पहुँच जाँची जा रही है…', 'Checking your access…'))}</div></main>`;
 }
-const ADMIN_ROUTES = new Set(['admin', 'admin-ai', 'admin-review', 'admin-publish', 'admin-bank', 'admin-news', 'admin-days', 'admin-rewards']);
+const ADMIN_ROUTES = new Set(['admin', 'admin-ai', 'admin-review', 'admin-publish', 'admin-bank', 'admin-news', 'admin-days', 'admin-rewards', 'admin-translate', 'admin-analytics', 'admin-io']);
 function cmsNote() {
   if (P.demo) return `<div class="note">${ic('info')}<div>${L('<b>टेस्ट संस्करण:</b> यहाँ किए बदलाव केवल आपके ब्राउज़र में सहेजे जाते हैं — बेझिझक आज़माएँ। असली ऐप पर कोई असर नहीं होगा।', '<b>Test build:</b> changes here are saved only in your browser, so try anything. The real app is not affected.')}</div></div>`;
   if (P.mode === 'standalone') return `<div class="note">${ic('info')}<div>${L('<b>डेमो मोड:</b> यहाँ किए बदलाव केवल इसी ब्राउज़र में सहेजे जाते हैं। असली ऐप में यही पैनल सर्वर से जुड़ेगा।', '<b>Demo mode:</b> changes here are saved only in this browser. In the real app this panel connects to the server.')}</div></div>`;
@@ -25,7 +25,7 @@ function vAdmin() {
   const players = LB.board('week').filter(r => r.p > 0).length;
   const act = (href, icon, label, cnt = 0) => `<a class="act" href="#${href}"><span class="ai">${ic(icon)}</span><span>${label}</span>${ic('chev-right', 'chev')}${cnt ? `<span class="cnt">${cnt}</span>` : ''}</a>`;
   return `<header class="appbar admin-hero"><div class="appbar-in gutter">
-    <div class="logo" style="flex:1;font-size:1.45rem">${capLogo()}<span>MY <span class="q">QUIZ</span><small>ADMIN PANEL</small></span></div>
+    <div class="logo" style="flex:1;min-width:0;font-size:1.3rem;overflow:hidden">${capLogo()}<span>MY <span class="q">QUIZ</span><small>ADMIN PANEL</small></span></div>
     ${langBtn()}
     <a class="iconbtn" href="#home" aria-label="${L('ऐप पर लौटें', 'Back to the app')}" title="${L('ऐप पर लौटें', 'Back to the app')}">${ic('settings')}</a>
   </div></header>
@@ -49,7 +49,11 @@ function vAdmin() {
     ${act('admin-review', 'shield', L('सामग्री की जाँच करें', 'Review content'), pending.length + reports)}
     ${act('admin-bank', 'book', L('GK प्रश्न बैंक', 'GK question bank'))}
     ${act('admin-publish', 'send', L('प्रकाशित करें', 'Publish'), approved)}
+    ${act('admin-translate', 'languages', L('अनुवाद प्रबंधन', 'Translations'), missingEn().length)}
+    ${act('admin-analytics', 'chart', L('विश्लेषण', 'Analytics'))}
+    ${act('admin-io', 'download', L('आयात / निर्यात', 'Import / export'))}
   </div>
+  <button class="switch" data-act="cms-foureyes" role="switch" aria-checked="${CMSSET.fourEyes}"><span class="row-main"><b>${L('दूसरे संपादक की मंज़ूरी ज़रूरी', 'Require a second editor\'s approval')}</b><span class="row-sub">${L('ड्राफ़्ट बनाने वाला संपादक उसे ख़ुद स्वीकृत नहीं कर सकेगा (केवल मालिक बदल सकता है)। आपकी भूमिका: ', 'The editor who created a draft cannot approve it (owner only). Your role: ')}${LOCAL() ? L('डेमो', 'demo') : P.owner ? L('मालिक', 'owner') : L('संपादक', 'editor')}</span></span><span class="knob" aria-hidden="true"></span></button>
 </main>`;
 }
 
@@ -146,9 +150,10 @@ function vAdminReview() {
     return `<article class="card draft">
     <div class="draft-head"><span class="tag ${d.origin === 'ai' ? 'tag-ai' : ''}">${d.origin === 'ai' ? 'AI' : L('मैनुअल', 'Manual')}</span><span class="tag">${typeLabel(d.type)}</span>${base ? `<span class="tag">${L('मूल प्रश्न में संपादन', 'Edit of a built-in question')}</span>` : ''}${d.note && !base ? `<span class="tag">${esc(d.note)}</span>` : ''}<span class="small muted">${relTime(d.createdAt)}</span></div>
     ${draftPreview(d)}
+    ${qualityHtml(d)}
     ${d.source ? `<details><summary class="small" style="cursor:pointer;font-weight:700;color:var(--brand)">${L('स्रोत पाठ देखें', 'Show source text')}</summary><p class="small" style="white-space:pre-wrap;margin:6px 0 0">${esc(d.source)}</p></details>` : ''}
     <fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:8px"><legend class="small muted" style="padding:0;margin-bottom:6px">${L('समीक्षा सूची — सभी पर निशान लगाने के बाद ही स्वीकृति', 'Review checklist: tick every item to approve')}</legend>${checks.map((c, i) => `<label class="check"><input type="checkbox" data-chk="${esc(d.id)}" data-ci="${i}" ${(reviewChecks[d.id] || [])[i] ? 'checked' : ''}> ${L(c[0], c[1])}</label>`).join('')}</fieldset>
-    <div class="btnrow"><button class="btn btn-sm btn-cta" id="ap-${esc(d.id)}" data-act="draft-approve" data-id="${esc(d.id)}" ${checks.every((_, i) => (reviewChecks[d.id] || [])[i]) ? '' : 'disabled'}>${ic('check')} ${L('स्वीकृत करें', 'Approve')}</button><button class="btn btn-sm btn-outline" data-act="draft-edit" data-id="${esc(d.id)}">${ic('pencil')} ${L('संपादित करें', 'Edit')}</button><button class="btn btn-sm btn-danger" data-act="draft-reject" data-id="${esc(d.id)}">${ic('trash')} ${L('अस्वीकार', 'Reject')}</button></div>
+    <div class="btnrow"><button class="btn btn-sm btn-cta" id="ap-${esc(d.id)}" data-act="draft-approve" data-id="${esc(d.id)}" data-block="${hasErr(d) || otherEditorNeeded(d) ? 1 : 0}" ${checks.every((_, i) => (reviewChecks[d.id] || [])[i]) && !hasErr(d) && !otherEditorNeeded(d) ? '' : 'disabled'}>${ic('check')} ${L('स्वीकृत करें', 'Approve')}</button><button class="btn btn-sm btn-outline" data-act="draft-edit" data-id="${esc(d.id)}">${ic('pencil')} ${L('संपादित करें', 'Edit')}</button><button class="btn btn-sm btn-danger" data-act="draft-reject" data-id="${esc(d.id)}">${ic('trash')} ${L('अस्वीकार', 'Reject')}</button></div>
   </article>`;
   }).join('');
   const rl = reports.map(r => {
@@ -195,7 +200,7 @@ function bankListHtml() {
   const del = q => q.src === 'base' ? L('छिपाएँ', 'Hide') : q.src === 'edited' ? L('मूल पर लौटाएँ', 'Restore original') : L('हटाएँ', 'Remove');
   const enTag = q => (q.en && q.en.q ? '<span class="tag">EN ✓</span>' : `<span class="tag tag-warn">${L('EN नहीं', 'No EN')}</span>`);
   return `<p class="small muted" style="margin:0">${L(`${all.length} प्रश्न`, `${all.length} questions`)}${bankState.subj ? '' : L(` · इनके अलावा ${m.dayQs.length} प्रश्न "महत्वपूर्ण दिवस" कैलेंडर से अपने-आप बनते हैं`, ` · plus ${m.dayQs.length} questions made automatically from the important-days calendar`)}</p>
-  <div class="list">${list.map(q => `<div class="review-item"><div class="draft-head">${tag(q)}${enTag(q)}<span class="small muted">${esc(subjName(q.s))}${q.t ? ' · ' + esc(qTopic(q)) : ''}</span></div><b>${esc(qT(q))}</b><span class="ans">${L('उत्तर', 'Answer')}: <span class="ans-ok">${esc(qO(q)[q.a])}</span></span><div class="btnrow" style="gap:14px"><button class="link" data-act="bank-edit" data-id="${esc(q.id)}">${ic('pencil')} ${L('संपादित करें', 'Edit')}</button><button class="link" style="color:var(--bad)" data-act="bank-remove" data-id="${esc(q.id)}">${ic('trash')} ${del(q)}</button></div></div>`).join('') || emptyState('search', L('कोई प्रश्न नहीं मिला', 'No questions found'), '')}</div>
+  <div class="list">${list.map(q => `<div class="review-item"><div class="draft-head">${tag(q)}${enTag(q)}<span class="small muted">${esc(subjName(q.s))}${q.t ? ' · ' + esc(qTopic(q)) : ''}</span></div><b>${esc(qT(q))}</b><span class="ans">${L('उत्तर', 'Answer')}: <span class="ans-ok">${esc(qO(q)[q.a])}</span></span><div class="btnrow" style="gap:14px"><button class="link" data-act="bank-edit" data-id="${esc(q.id)}">${ic('pencil')} ${L('संपादित करें', 'Edit')}</button><button class="link" data-act="bank-history" data-id="${esc(q.id)}">${ic('clock')} ${L('इतिहास', 'History')}</button><button class="link" style="color:var(--bad)" data-act="bank-remove" data-id="${esc(q.id)}">${ic('trash')} ${del(q)}</button></div></div>`).join('') || emptyState('search', L('कोई प्रश्न नहीं मिला', 'No questions found'), '')}</div>
   ${all.length > list.length ? `<button class="btn btn-outline" data-act="bank-more">${L('और दिखाएँ', 'Show more')} (${all.length - list.length})</button>` : ''}`;
 }
 function vAdminBank() {
@@ -372,31 +377,6 @@ function vAdminRewards() {
 </main>`;
 }
 
-// Question editor (sheet) — used by AI results, review, bank and new questions.
-let qEditCb = null;
-function openQEditor(init, onSave, title) {
-  const q = { s: 'misc', t: '', q: '', o: ['', '', '', ''], a: 0, e: '', d: 1, ...clone(init || {}) };
-  const en = q.en && typeof q.en === 'object' ? q.en : { q: '', o: ['', '', '', ''], e: '', t: '' };
-  const eo = Array.isArray(en.o) ? en.o : ['', '', '', ''];
-  title = title || L('प्रश्न संपादित करें', 'Edit question');
-  qEditCb = onSave;
-  openSheet(`${sheetHead(title)}<form data-form="qedit" style="display:flex;flex-direction:column;gap:12px">
-  <div class="grid2"><div class="field"><label for="qe-s">${L('विषय', 'Subject')}</label><select class="select" id="qe-s">${SUBJECTS.filter(s => s.k !== 'days').map(s => `<option value="${s.k}" ${s.k === q.s ? 'selected' : ''}>${subjName(s.k)}</option>`).join('')}</select></div>
-  <div class="field"><label for="qe-d">${L('कठिनाई', 'Difficulty')}</label><select class="select" id="qe-d">${[[1, 'आसान', 'Easy'], [2, 'मध्यम', 'Medium'], [3, 'कठिन', 'Hard']].map(([v, hi, enl]) => `<option value="${v}" ${Number(q.d) === v ? 'selected' : ''}>${L(hi, enl)}</option>`).join('')}</select></div></div>
-  <div class="field"><label for="qe-t">${L('उप-विषय', 'Topic')}</label><input class="input" id="qe-t" value="${esc(q.t || '')}" maxlength="40"></div>
-  <div class="field"><label for="qe-q">${L('प्रश्न', 'Question')} (हिंदी)</label><textarea class="textarea" id="qe-q" rows="3" style="min-height:80px">${esc(q.q)}</textarea></div>
-  <div class="field"><span class="lbl">${L('विकल्प', 'Options')} <span class="muted small">(${L('सही विकल्प चुनें', 'select the right one')})</span></span>${[0, 1, 2, 3].map(i => `<div class="optedit"><input type="radio" name="qe-a" value="${i}" ${q.a === i ? 'checked' : ''} aria-label="${L(`विकल्प ${LETTERS[i]} सही है`, `Option ${LETTERS[i]} is right`)}"><input class="input" id="qe-o${i}" value="${esc(q.o[i] || '')}" placeholder="${L('विकल्प', 'Option')} ${LETTERS[i]}"></div>`).join('')}</div>
-  <div class="field"><label for="qe-e">${L('व्याख्या', 'Explanation')}</label><textarea class="textarea" id="qe-e" rows="3" style="min-height:80px">${esc(q.e || '')}</textarea></div>
-  <details class="en-fields" ${en.q ? 'open' : ''}><summary>${ic('languages')} English ${optional()}</summary>
-    <p class="small muted" style="margin:0">${L('विकल्प उसी क्रम में लिखें — सही उत्तर वही रहेगा जो ऊपर चुना है।', 'Write the options in the same order; the right answer is the one selected above.')}</p>
-    <div class="field"><label for="qe-en-q">Question (English)</label><textarea class="textarea" id="qe-en-q" rows="2" style="min-height:70px" lang="en">${esc(en.q || '')}</textarea></div>
-    ${[0, 1, 2, 3].map(i => `<div class="field"><label for="qe-en-o${i}" class="small">Option ${LETTERS[i]}</label><input class="input" id="qe-en-o${i}" value="${esc(eo[i] || '')}" lang="en"></div>`).join('')}
-    <div class="field"><label for="qe-en-e">Explanation (English)</label><textarea class="textarea" id="qe-en-e" rows="2" style="min-height:70px" lang="en">${esc(en.e || '')}</textarea></div>
-    <div class="field"><label for="qe-en-t">Topic (English)</label><input class="input" id="qe-en-t" value="${esc(en.t || '')}" maxlength="40" lang="en"></div>
-  </details>
-  <p class="small" id="qe-err" style="margin:0;color:var(--bad)" role="alert"></p>
-  <button class="btn btn-cta btn-block" type="submit">${ic('check')} ${L('सहेजें', 'Save')}</button></form>`, { label: title });
-}
 function newsEditorSheet(d) {
   const title = L('समाचार संपादित करें', 'Edit news');
   openSheet(`${sheetHead(title)}<form data-form="news-edit" data-id="${esc(d.id)}" style="display:flex;flex-direction:column;gap:12px">${newsFields('ne', d.data)}<p class="small" id="ne-err" style="margin:0;color:var(--bad)" role="alert"></p><button class="btn btn-cta btn-block" type="submit">${ic('check')} ${L('सहेजें', 'Save')}</button></form>`, { label: title });

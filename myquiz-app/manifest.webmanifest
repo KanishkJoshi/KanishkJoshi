@@ -1,7 +1,7 @@
 {
   "name": "MY QUIZ — सामान्य ज्ञान | GK Quiz",
   "short_name": "MY QUIZ",
-  "description": "हिंदी और English में सामान्य ज्ञान क्विज, करेंट अफेयर्स, आज का दिन, मॉक टेस्ट, रिवॉर्ड पॉइंट्स और लीडरबोर्ड · Hindi & English GK quiz with current affairs, mock tests, reward points and leaderboards",
+  "description": "हिंदी और English में सीखने, अभ्यास, दोहराव और मुक़ाबले का ऐप: अध्याय-वार प्रश्न, विस्तृत व्याख्या, करेंट अफेयर्स, आज का दिन, मॉक टेस्ट और लीडरबोर्ड · Bilingual learning app for Indian competitive exams",
   "lang": "hi",
   "dir": "ltr",
   "start_url": "./#home",
@@ -38,14 +38,19 @@
   ],
   "shortcuts": [
     {
-      "name": "दैनिक क्विज · Daily quiz",
-      "short_name": "क्विज",
-      "url": "./#quiz"
+      "name": "आज की चुनौती · Daily challenge",
+      "short_name": "चुनौती",
+      "url": "./#compete"
     },
     {
-      "name": "लीडरबोर्ड · Leaderboard",
-      "short_name": "लीडरबोर्ड",
-      "url": "./#leaders"
+      "name": "सीखें · Learn",
+      "short_name": "सीखें",
+      "url": "./#learn"
+    },
+    {
+      "name": "दोहराव · Revision",
+      "short_name": "दोहराव",
+      "url": "./#revise"
     },
     {
       "name": "करेंट अफेयर्स · Current affairs",

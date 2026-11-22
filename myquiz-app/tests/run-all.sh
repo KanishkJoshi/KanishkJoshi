@@ -7,7 +7,7 @@ trap 'kill $SRV 2>/dev/null' EXIT
 sleep 1
 mkdir -p tests/shots
 FAIL=0
-for t in e2e.js e2e-artifact.js e2e-demo.js e2e-v2.js smoke.js; do
+for t in e2e.js e2e-artifact.js e2e-demo.js e2e-v2.js e2e-v3.js smoke.js; do
   echo "== $t"
   node "tests/$t" tests/shots > "tests/shots/$t.log" 2>&1 || FAIL=1
   grep -E "ERRORS \(|CHECKS:|SMOKE:|TEST CRASH|FAIL" "tests/shots/$t.log" | head -8

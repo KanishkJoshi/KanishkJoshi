@@ -8,7 +8,9 @@ const { chromium } = require('playwright');
   p.on('pageerror', e => errs.push(e.message));
   p.on('console', m => { if (m.type() === 'error' && !/fonts\.g/.test(m.text())) errs.push(m.text()); });
   await p.goto('http://127.0.0.1:8765/index.html?demo=1#home');
-  await p.waitForSelector('.tile');
+  await p.waitForSelector('.onb-page');
+  await p.click('[data-act="wz-finish"]');
+  await p.waitForSelector('.dash .next');
   await p.click('[data-act="start-daily"]');
   await p.waitForSelector('.qtext');
   for (let i = 0; i < 10; i++) {

@@ -23,7 +23,7 @@ assert '<script src="app.js"></script>' in body
 cfg = ''
 if demo:
     head = head.replace('<title>MY QUIZ</title>', '<title>MY QUIZ Demo</title>', 1)
-    cfg = '<script>window.MYQUIZ_CONFIG = ' + json.dumps({'demo': True, 'build': 'Demo v2.0 · 22 Nov 2026'}, ensure_ascii=False) + ';</script>\n'
+    cfg = '<script>window.MYQUIZ_CONFIG = ' + json.dumps({'demo': True, 'build': 'Demo v3.0 · 22 Nov 2026'}, ensure_ascii=False) + ';</script>\n'
 body = body.replace('<script src="app.js"></script>', cfg + '<script>\n' + js + '\n</script>')
 page = head + '\n' + body + '\n'
 open(out_file, 'w', encoding='utf-8').write(page)

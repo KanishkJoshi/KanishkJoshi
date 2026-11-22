@@ -3,7 +3,7 @@
  * - /data/*.json content: network first so new current affairs appear, cache when offline.
  * - Google Fonts: cache first.
  * Bump CACHE when shipping breaking changes to force a clean cache. */
-const CACHE = 'myquiz-v2';
+const CACHE = 'myquiz-v3';
 const SHELL = ['./', './index.html', './app.js', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png',
   './data/questions.json', './data/news.json', './data/days.json'];
 

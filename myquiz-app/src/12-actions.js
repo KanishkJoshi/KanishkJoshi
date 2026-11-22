@@ -142,7 +142,7 @@ const ACTIONS = {
   'exam-submit-ask': () => openSheet(submitAskHtml(), { label: L('सबमिट करें', 'Submit') }),
   'exam-submit': () => submitExam(false),
   'exam-exit': () => openSheet(`${sheetHead(L('परीक्षा से बाहर जाएँ?', 'Leave the test?'))}<p style="margin:0">${L('परीक्षा जारी रहेगी और समय चलता रहेगा। आप "अभ्यास परीक्षा" से इसे फिर खोल सकते हैं।', 'The test stays open and the timer keeps running. You can reopen it from "Mock Tests".')}</p><div class="btnrow"><button class="btn btn-grey" data-act="exam-leave">${L('बाहर जाएँ', 'Leave')}</button><button class="btn btn-cta" data-act="exam-submit-ask">${L('सबमिट करें', 'Submit')}</button><button class="btn btn-outline" data-act="sheet-close">${L('जारी रखें', 'Continue')}</button></div>`, { label: L('परीक्षा से बाहर', 'Leave the test') }),
-  'exam-leave': () => { closeSheet(); nav('mock'); },
+  'exam-leave': () => { closeSheet(); nav((E && E.back) || 'mock'); },
   'bm-tab': el => { bmTab = el.dataset.v; render(); },
   'set-goal': el => { U.s.goal = Number(el.dataset.v); U.touch(); render(); },
   'set-scale': el => { U.s.set.scale = Number(el.dataset.v); U.touch(); applySettings(); render(); },
@@ -228,7 +228,7 @@ const ACTIONS = {
   'bank-edit': el => {
     const q = M().byId.get(el.dataset.id);
     if (!q || q.gen) return;
-    const orig = { id: q.id, s: q.s, t: q.t, q: q.q, o: q.o, a: q.a, e: q.e, d: q.d, ...(q.n ? { n: q.n } : {}), ...(q.day ? { day: q.day } : {}), ...(q.en ? { en: q.en } : {}) };
+    const orig = { id: q.id, s: q.s, t: q.t, q: q.q, o: q.o, a: q.a, e: q.e, d: q.d, ...(q.ch ? { ch: q.ch } : {}), ...(q.ex ? { ex: q.ex } : {}), ...(q.why ? { why: q.why } : {}), ...(q.ctx ? { ctx: q.ctx } : {}), ...(q.ref ? { ref: q.ref } : {}), ...(q.n ? { n: q.n } : {}), ...(q.day ? { day: q.day } : {}), ...(q.en ? { en: q.en } : {}) };
     openQEditor(orig, async edited => {
       try { await CMS.putDraft({ type: 'q', status: 'draft', origin: 'manual', note: L('संपादन', 'Edit'), data: { ...orig, ...edited, id: q.id } }); toast(L('संपादन समीक्षा कतार में भेजा गया', 'Edit sent to the review queue')); } catch (e) { toast(dbMsg(e), 'err'); }
     });
@@ -406,6 +406,6 @@ function updateApproveBtn(id, el) {
   if (el) { (reviewChecks[id] = reviewChecks[id] || [])[Number(el.dataset.ci)] = el.checked; }
   const boxes = $$(`input[data-chk="${CSS.escape(id)}"]`);
   const btn = document.getElementById('ap-' + id);
-  if (btn) btn.disabled = !boxes.every(b => b.checked);
+  if (btn) btn.disabled = btn.dataset.block === '1' || !boxes.every(b => b.checked);
 }
 

@@ -7,7 +7,7 @@ function adminBar(title, back = 'admin') {
 }
 // Four sections: Home · Learn · Compete · Progress. Profile, settings and notifications live in the top bar.
 const NAV = [['home', 'होम', 'Home', 'home'], ['learn', 'सीखें', 'Learn', 'book-open'], ['compete', 'मुक़ाबला', 'Compete', 'trophy'], ['progress', 'प्रगति', 'Progress', 'chart']];
-const NAV_OF = { quiz: 'learn', subject: 'learn', chapter: 'learn', ca: 'learn', news: 'learn', today: 'learn', revise: 'learn', cards: 'learn', bookmarks: 'learn', mock: 'compete', leaders: 'compete', builder: 'compete', challenge: 'compete', profile: 'progress' };
+const NAV_OF = { quiz: 'learn', subject: 'learn', chapter: 'learn', ca: 'learn', news: 'learn', today: 'learn', revise: 'learn', cards: 'learn', bookmarks: 'learn', 'ca-notes': 'learn', mock: 'compete', leaders: 'compete', builder: 'compete', challenge: 'compete', profile: 'progress' };
 const bottomNav = active => { active = NAV_OF[active] || active; return `<nav class="bnav" aria-label="${L('मुख्य मेनू', 'Main menu')}"><div class="bnav-in">${NAV.map(([r, hi, en, i]) => `<a href="#${r}"${r === active ? ' aria-current="page"' : ''}>${ic(i)}<span>${L(hi, en)}</span></a>`).join('')}</div></nav>`; };
 // Top bar for the four main sections: title, notifications and the profile/settings avatar.
 function topbar(title) {
@@ -35,7 +35,8 @@ function qPreview(q) {
   ${en ? `<div class="qprev-en"><span class="tag">EN</span><b>${esc(en.q)}</b><ol type="A">${opts(en.o)}</ol>${en.e ? `<span class="small muted">${esc(en.e)}</span>` : ''}</div>` : `<span class="small muted">${L('अंग्रेज़ी संस्करण नहीं है — अंग्रेज़ी में हिंदी दिखेगी।', 'No English version: English users will see the Hindi text.')}</span>`}</div>`;
 }
 function dataErrorNote() {
-  return `<div class="note note-warn">${ic('alert')}<div>${L('<b>सामग्री लोड नहीं हुई।</b> ऐप को किसी वेब सर्वर से खोलें (जैसे <code>npx serve</code>)। सीधे फ़ाइल खोलने पर ब्राउज़र डेटा फ़ाइलें नहीं पढ़ पाता।', '<b>Content did not load.</b> Open the app from a web server (for example <code>npx serve</code>). Browsers cannot read the data files when the page is opened directly from disk.')}</div></div>`;
+  const off = navigator.onLine === false;
+  return `<div class="note note-warn">${ic(off ? 'wifi-off' : 'alert')}<div class="retry-row"><span>${off ? L('<b>इंटरनेट नहीं है।</b> सामग्री लोड नहीं हुई — कनेक्शन आने पर फिर कोशिश करें।', '<b>No internet.</b> Content did not load — try again when you are connected.') : L('<b>सामग्री लोड नहीं हुई।</b> नेटवर्क जाँचें और फिर कोशिश करें। (फ़ाइल सीधे खोलने पर ब्राउज़र डेटा नहीं पढ़ पाता — ऐप को वेब सर्वर से खोलें।)', '<b>Content did not load.</b> Check the network and try again. (Browsers cannot read the data when the page is opened directly from disk — open it from a web server.)')}</span><button class="btn btn-sm btn-outline" data-act="retry-load">${ic('rotate')} ${L('फिर कोशिश करें', 'Try again')}</button></div></div>`;
 }
 
 // Bottom sheet (modal) and toast.
