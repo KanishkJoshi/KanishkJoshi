@@ -5,8 +5,18 @@ function appbar(title, { back = '', right = '' } = {}) {
 function adminBar(title, back = 'admin') {
   return appbar(title, { back, right: `<a class="iconbtn" href="#home" aria-label="${L('ऐप पर लौटें', 'Back to the app')}" title="${L('ऐप पर लौटें', 'Back to the app')}">${ic('home')}</a>` });
 }
-const NAV = [['home', 'होम', 'Home', 'home'], ['quiz', 'क्विज', 'Quiz', 'book-open'], ['leaders', 'लीडरबोर्ड', 'Leaders', 'trophy'], ['bookmarks', 'बुकमार्क', 'Saved', 'bookmark'], ['profile', 'प्रोफ़ाइल', 'Profile', 'user']];
-const bottomNav = active => `<nav class="bnav" aria-label="${L('मुख्य मेनू', 'Main menu')}"><div class="bnav-in">${NAV.map(([r, hi, en, i]) => `<a href="#${r}"${r === active ? ' aria-current="page"' : ''}>${ic(i)}<span>${L(hi, en)}</span></a>`).join('')}</div></nav>`;
+// Four sections: Home · Learn · Compete · Progress. Profile, settings and notifications live in the top bar.
+const NAV = [['home', 'होम', 'Home', 'home'], ['learn', 'सीखें', 'Learn', 'book-open'], ['compete', 'मुक़ाबला', 'Compete', 'trophy'], ['progress', 'प्रगति', 'Progress', 'chart']];
+const NAV_OF = { quiz: 'learn', subject: 'learn', chapter: 'learn', ca: 'learn', news: 'learn', today: 'learn', revise: 'learn', cards: 'learn', bookmarks: 'learn', mock: 'compete', leaders: 'compete', builder: 'compete', challenge: 'compete', profile: 'progress' };
+const bottomNav = active => { active = NAV_OF[active] || active; return `<nav class="bnav" aria-label="${L('मुख्य मेनू', 'Main menu')}"><div class="bnav-in">${NAV.map(([r, hi, en, i]) => `<a href="#${r}"${r === active ? ' aria-current="page"' : ''}>${ic(i)}<span>${L(hi, en)}</span></a>`).join('')}</div></nav>`; };
+// Top bar for the four main sections: title, notifications and the profile/settings avatar.
+function topbar(title) {
+  const n = notifications().length, name = U.s.name.trim();
+  return `<header class="appbar topbar"><div class="appbar-in gutter"><h1>${title}</h1>
+    <button class="iconbtn" data-act="notifs" aria-label="${L('सूचनाएँ', 'Notifications')}${n ? ` (${n})` : ''}">${ic('bell')}${n ? `<span class="dot">${n}</span>` : ''}</button>
+    <a class="iconbtn" href="#profile" aria-label="${L('प्रोफ़ाइल और सेटिंग्स', 'Profile and settings')}"><span class="avatar">${name ? esc(initial(name)) : ic('user')}</span></a>
+  </div></header>`;
+}
 function ring(p, size, stroke, color = 'var(--ring)') {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r, off = c * (1 - clamp(p, 0, 1)), h = size / 2;
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true"><circle cx="${h}" cy="${h}" r="${r}" fill="none" style="stroke:var(--ring-track)" stroke-width="${stroke}"/><circle cx="${h}" cy="${h}" r="${r}" fill="none" style="stroke:${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" transform="rotate(-90 ${h} ${h})"/></svg>`;
