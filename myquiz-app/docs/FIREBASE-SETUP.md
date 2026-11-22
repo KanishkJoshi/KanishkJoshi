@@ -71,11 +71,15 @@ Your app is live at `https://<project-id>.web.app`. To use your own domain: Host
    (another Google account or a private window): the question is there.
 
 ## Costs and limits
-- The free **Spark** plan covers a pilot. Firestore allows 50,000 document reads and 20,000 writes per day and
-  1 GiB of storage.
-- Each app open reads published content and the leaderboard. For thousands of daily students, switch to the
-  pay-as-you-go **Blaze** plan and move leaderboard totals and points to Cloud Functions (server-side scoring).
-  That second step also makes prizes cheat-proof (see README → Path to production).
+- The free **Spark** plan allows 50,000 document reads and 20,000 writes per day and 1 GiB of storage. With the
+  app as it is today, that covers a pilot of up to about 100 active students a day.
+- Why not more: every time the app opens it reads **every student's leaderboard entry**, and each answered
+  question saves the student's progress and leaderboard total (2 writes). Reads therefore grow with
+  students × app opens. Example: 300 students opening the app twice a day ≈ 180,000 reads a day, well over the
+  free limit. On the pay-as-you-go **Blaze** plan the bill would grow faster than the number of students.
+- Before a bigger launch: load only the top 100 of the leaderboard plus each student's own entry, save totals at
+  the end of each quiz instead of after every answer, and move points and leaderboard totals to Cloud Functions
+  (Blaze plan). Server-side scoring also makes prizes cheat-proof (see README → Path to production).
 
 ## Optional settings (`config.js`)
 | Key | Meaning |

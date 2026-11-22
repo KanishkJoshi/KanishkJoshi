@@ -98,6 +98,7 @@ With a Firebase config in `config.js`, the app opens on a **"Continue with Googl
 - **Admins:** Google emails listed in Firestore `admins/{email}`. The owner is set once in the console; after that the owner manages the **Admin team** inside the app.
 - **Security:** [`firestore.rules`](firestore.rules) lets students read and write only their own progress. The leaderboard accepts only a name and point totals within daily limits, and only admins publish or see drafts and reports.
 - **SDK:** the Firebase JS SDK 10.12.2 is bundled in `vendor/` (Apache-2.0) and loaded only when configured. `firebase.json` deploys the app and the rules to Firebase Hosting.
+- **Cost:** the free Firebase plan covers a pilot of about 100 active students a day, because each app open reads every leaderboard entry. Before a bigger launch, see [Costs and limits](docs/FIREBASE-SETUP.md#costs-and-limits).
 - **claude.ai versions:** they keep using claude.ai's own sign-in, because Google sign-in cannot run inside a claude.ai page.
 
 ## Language (हिंदी / English)
