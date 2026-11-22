@@ -67,7 +67,7 @@ students without human review, readability over decoration.
 - [x] M4 Exam builder + result analysis, weekly challenge, friend challenge, AI tutor
 - [x] M5 Current affairs articles (+ TTS, PDF notes, daily/weekly/monthly), Aaj ka Din daily session
 - [x] M6 Admin CMS upgrades (quality checks, tagging, translations, history, import/export, analytics)
-- [ ] M7 UX states (offline, retry), accessibility pass, tests, publish both artifacts, README, summary
+- [x] M7 UX states (offline, retry), accessibility pass, tests, publish both artifacts, README, summary
 
 ## 4. How to continue (for a fresh session)
 
@@ -83,4 +83,5 @@ https://claude.ai/artifact/TYUHLNaspNcibKAUdXz7DY with `files` = data/*.json (ke
 ## 5. Progress log
 - 01:15 IST — M0 done.
 - Overnight — M1 done and pushed; the session paused (usage limit) during M2.
-- 05:41 IST — resumed after the reset; M2–M6 code complete, suites passing except fixes in progress.
+- 05:41 IST — resumed after the reset; finished M2–M7.
+- 06:10 IST — all suites pass (standalone, artifact runtime, tester build, v2, v3 flows, 360px smoke in hi/en × light/dark); main app published as Version 5, tester build as Version 3.
