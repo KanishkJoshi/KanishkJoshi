@@ -1,6 +1,6 @@
 // ───────────────────────────── router & render ─────────────────────────────
-const ROUTES = { home: vHome, welcome: vWelcome, learn: vLearn, quiz: vLearn, subject: vSubject, chapter: vChapter, revise: vRevise, cards: vCards, notes: vNotes, compete: vCompete, builder: vBuilder, challenge: vChallenge, progress: vProgress, news: vNews, 'ca-notes': vCaNotes, 'admin-translate': vAdminTranslate, 'admin-analytics': vAdminAnalytics, 'admin-io': vAdminIO, play: vPlay, result: vResult, ca: vCA, today: vToday, mock: vMock, exam: vExam, 'exam-result': vExamResult, bookmarks: vBookmarks, leaders: vLeaders, profile: vProfile, admin: vAdmin, 'admin-ai': vAdminAI, 'admin-review': vAdminReview, 'admin-publish': vAdminPublish, 'admin-bank': vAdminBank, 'admin-news': vAdminNews, 'admin-days': vAdminDays, 'admin-rewards': vAdminRewards, test: vTest, 'test-inbox': vTestInbox };
-const NO_NAV = new Set(['welcome', 'play', 'result', 'exam', 'exam-result', 'cards', 'notes', 'ca-notes', 'test-inbox', ...ADMIN_ROUTES]);
+const ROUTES = { home: vHome, login: vLogin, welcome: vWelcome, learn: vLearn, quiz: vLearn, subject: vSubject, chapter: vChapter, revise: vRevise, cards: vCards, notes: vNotes, compete: vCompete, builder: vBuilder, challenge: vChallenge, progress: vProgress, news: vNews, 'ca-notes': vCaNotes, 'admin-translate': vAdminTranslate, 'admin-analytics': vAdminAnalytics, 'admin-io': vAdminIO, 'admin-team': vAdminTeam, play: vPlay, result: vResult, ca: vCA, today: vToday, mock: vMock, exam: vExam, 'exam-result': vExamResult, bookmarks: vBookmarks, leaders: vLeaders, profile: vProfile, admin: vAdmin, 'admin-ai': vAdminAI, 'admin-review': vAdminReview, 'admin-publish': vAdminPublish, 'admin-bank': vAdminBank, 'admin-news': vAdminNews, 'admin-days': vAdminDays, 'admin-rewards': vAdminRewards, test: vTest, 'test-inbox': vTestInbox };
+const NO_NAV = new Set(['login', 'welcome', 'play', 'result', 'exam', 'exam-result', 'cards', 'notes', 'ca-notes', 'test-inbox', ...ADMIN_ROUTES]);
 // Routes look like #chapter/h-mod: the first part picks the screen, the rest is its argument.
 let route = 'home', routeArg = '';
 function parseRoute(h) {
@@ -37,8 +37,8 @@ function scheduleRender() {
 function render(routeChanged = false) {
   clearInterval(tickId); tickId = 0;
   const app = $('#app');
-  app.innerHTML = (navigator.onLine === false ? `<div class="offline" role="status">${ic('wifi-off')} ${L('आप ऑफ़लाइन हैं — अभ्यास जारी रखें, प्रगति बाद में सिंक होगी।', 'You are offline — keep practising; progress syncs later.')}</div>` : '') + (ROUTES[route] || vHome)();
-  app.classList.toggle('no-nav', NO_NAV.has(route));
+  app.innerHTML = (navigator.onLine === false ? `<div class="offline" role="status">${ic('wifi-off')} ${L('आप ऑफ़लाइन हैं — अभ्यास जारी रखें, प्रगति बाद में सिंक होगी।', 'You are offline — keep practising; progress syncs later.')}</div>` : '') + (authGate() || ROUTES[route] || vHome)();
+  app.classList.toggle('no-nav', NO_NAV.has(route) || !!authGate());
   app.classList.toggle('exam-pad', route === 'exam');
   if (routeChanged) window.scrollTo(0, 0);
   if (DEMO) renderDemoStrip();
@@ -144,7 +144,7 @@ function boot() {
   live.id = 'sr-live'; live.className = 'sr'; live.setAttribute('aria-live', 'assertive');
   document.body.appendChild(live);
   setRoute(location.hash);
-  if (!U.s.onb && (route === 'home' || !location.hash)) { route = 'welcome'; try { history.replaceState(null, '', '#welcome'); } catch { /* ignore */ } }
+  if (!P.cloud && !U.s.onb && (route === 'home' || !location.hash)) { route = 'welcome'; try { history.replaceState(null, '', '#welcome'); } catch { /* ignore */ } }
   if (LOCAL()) { loadLocalCms(); LB.loadLocal(); seedDemo(); Object.assign(CMSSET, LS.get('cms.settings', {}) || {}); }
   render(true);
   loadBase();

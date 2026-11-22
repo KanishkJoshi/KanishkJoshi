@@ -77,7 +77,7 @@ const T = {
         if (changed) { LS.set('test.bugs', this.bugs); if (route === 'test') scheduleRender(); }
       } catch (e) {
         this.shared = false;
-        if (e && ['invalid_argument', 'not_granted', 'revoked', 'capability_disabled', 'capability_removed'].includes(e.code)) this.denied = true;
+        if (e && ['invalid_argument', 'not_granted', 'revoked', 'capability_disabled', 'capability_removed', 'permission-denied', 'unauthenticated'].includes(e.code)) this.denied = true;
       }
     }, 1200);
   },

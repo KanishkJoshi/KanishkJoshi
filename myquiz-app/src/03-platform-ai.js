@@ -11,13 +11,16 @@ const P = {
   cdb: null, // database for content, progress and leaderboard; null keeps them in this browser
   user: null, sample: null, tts: null, downloads: null, uid: null, owner: false,
   isAdmin: false, editor: false, ready: false, progressRemote: false,
+  // Self-hosted app with Google sign-in: Firebase Auth + Firestore replace this browser's storage (see config.js).
+  cloud: !!(CFG.firebase && CFG.firebase.apiKey) && !(window.claude && typeof window.claude.use === 'function') && !DEMO,
+  authUser: null,
 };
-const LOCAL = () => P.mode === 'standalone' || P.demo;
+const LOCAL = () => (P.mode === 'standalone' && !P.cloud) || P.demo;
 if (LOCAL()) P.isAdmin = true; // local demo: the admin panel edits this browser's copy only
 const aiEndpoint = () => CFG.aiEndpoint || '';
 
 async function initPlatform() {
-  if (P.mode !== 'artifact') { P.ready = true; return; }
+  if (P.mode !== 'artifact') { if (P.cloud) { await initFirebase(); return; } P.ready = true; return; }
   const use = n => Promise.resolve().then(() => window.claude.use(n)).catch(() => null);
   const [db, user, sample, tts, downloads] = await Promise.all([use('db'), use('user'), use('sample'), use('tts'), use('downloads')]);
   P.db = db; P.cdb = P.demo ? null : db; P.user = user; P.sample = sample; P.tts = tts; P.downloads = downloads;
@@ -31,7 +34,8 @@ async function initPlatform() {
 }
 
 function dbMsg(e) {
-  const c = e && e.code;
+  const c0 = e && e.code;
+  const c = { 'permission-denied': 'not_granted', unauthenticated: 'not_granted', 'resource-exhausted': 'resource_exhausted', 'invalid-argument': 'invalid_argument', 'failed-precondition': 'invalid_argument' }[c0] || c0;
   const m = {
     invalid_argument: ['यह बदलाव सहेजा नहीं जा सका — आपके पास अनुमति नहीं है या डेटा अमान्य है।', 'This change could not be saved: you don\'t have permission or the data is invalid.'],
     quota_exceeded: ['संग्रहण सीमा भर गई है — पुरानी सामग्री हटाकर फिर कोशिश करें।', 'Storage is full. Remove old content and try again.'],

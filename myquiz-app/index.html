@@ -522,6 +522,14 @@ button.row:hover,a.row:hover{background:var(--surface-2)}
 .mod-list li{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
 .mod-list li:last-child{border-bottom:0}
 @media (max-width:360px){.bnav a{font-size:.7rem}.seg-4 button{font-size:.8rem}.stats-4 .stat b{font-size:1.05rem}}
+/* ---------- sign-in ---------- */
+.btn-google{background:#fff;color:#1f1f1f;border:1px solid #747775;font-weight:500}
+.btn-google .g-logo{width:20px;height:20px;flex:none}
+:root[data-theme="dark"] .btn-google{background:#131314;color:#e3e3e3;border-color:#8e918f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn-google{background:#131314;color:#e3e3e3;border-color:#8e918f}}
+.login h1{display:flex;align-items:center;gap:10px}
+.account .acc-photo{width:48px;height:48px;border-radius:50%;flex:none;object-fit:cover}
+.account{display:flex;flex-direction:column;gap:var(--s3)}
 /* ---------- v3 components: dashboard, learn tree, explanations, revision, onboarding, progress ---------- */
 .sec{display:flex;flex-direction:column;gap:var(--s3)}
 .sec>h2,.sec-title{font-size:var(--t-lg);font-weight:700}
@@ -662,11 +670,12 @@ button.row:hover,a.row:hover{background:var(--surface-2)}
 @media (max-width:360px){.qtext{font-size:1.25rem}.tile b{font-size:1.25rem}.stat b{font-size:1.35rem}.day-top{grid-template-columns:96px 1fr}}
 </style>
 <!--ARTIFACT-HEAD-END-->
-<meta name="theme-color" content="#0B2E6F">
+<meta name="theme-color" content="#0B2A5B">
 <meta name="description" content="MY QUIZ — हिंदी में सामान्य ज्ञान, करेंट अफेयर्स, आज का दिन और मॉक टेस्ट।">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
+<script src="config.js"></script>
 </head>
 <body>
 <!--ARTIFACT-BODY-START-->

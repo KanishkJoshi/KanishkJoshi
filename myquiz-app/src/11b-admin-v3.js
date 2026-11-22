@@ -146,7 +146,7 @@ function parseCsv(text) {
 }
 // Accepts the app's JSON format (array of questions) or the CSV columns above. Returns {items, errors}.
 function parseImport(text) {
-  const t = String(text || '').trim(), items = [], errors = [];
+  const t = String(text || '').replace(/^\ufeff/, '').trim(), items = [], errors = []; // Excel adds a BOM
   let raw = [];
   if (t.startsWith('[') || t.startsWith('{')) {
     try { const j = JSON.parse(t); raw = Array.isArray(j) ? j : Array.isArray(j.questions) ? j.questions : []; } catch { errors.push(L('JSON पढ़ा नहीं जा सका।', 'Could not read the JSON.')); }
@@ -173,7 +173,7 @@ function vAdminIO() {
   ${cmsNote()}
   <section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('download')} ${L('निर्यात', 'Export')}</h2>
     <p class="small muted" style="margin:0">${L(`पूरा प्रश्न बैंक (${M().qs.length} प्रश्न) — बैकअप या एक्सेल में संपादन के लिए।`, `The whole question bank (${M().qs.length} questions) — for backup or editing in a spreadsheet.`)}</p>
-    <div class="grid2"><button class="btn btn-outline" data-act="export" data-v="csv">CSV</button><button class="btn btn-outline" data-act="export" data-v="json">JSON</button></div></section>
+    <div class="grid2"><button class="btn btn-outline" data-act="export" data-v="csv">CSV</button><button class="btn btn-outline" data-act="export" data-v="json">JSON</button></div><button class="btn btn-outline" data-act="template">${ic('download')} ${L('खाली टेम्पलेट (उदाहरण सहित)', 'Blank template (with examples)')}</button></section>
   <form class="card" data-form="import" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('plus')} ${L('आयात', 'Import')}</h2>
     <p class="small muted" style="margin:0">${L('CSV (कॉलम: ', 'CSV (columns: ')}<code>${CSV_COLS.slice(0, 12).join(', ')}…</code>${L(') या JSON पेस्ट करें, या फ़ाइल चुनें। हर प्रश्न ड्राफ़्ट बनकर स्वचालित जाँच और मानव समीक्षा से गुज़रेगा।', ') or JSON, or choose a file. Every question becomes a draft and goes through automated checks and human review.')}</p>
     <input type="file" id="imp-file" accept=".csv,.json,text/csv,application/json" class="input">
@@ -211,4 +211,54 @@ async function openHistory(id) {
   if (!box) return;
   box.innerHTML = v.length ? v.map((h, i) => `<div class="review-item"><b>${esc(String(h.data.q || h.data.title || h.data.t || '').slice(0, 120))}</b><span class="small muted">${relTime(h.at)} · ${L('उत्तर', 'Answer')}: ${esc((h.data.o || [])[h.data.a] || '—')}</span><div><button class="link" data-act="hist-restore" data-id="${esc(id)}" data-i="${i}">${ic('rotate')} ${L('इसे बहाल करें (समीक्षा के लिए)', 'Restore this (sends to review)')}</button></div></div>`).join('')
     : `<div class="empty">${L('अभी कोई पिछला संस्करण नहीं। प्रकाशित बदलावों के बाद यहाँ पुराने संस्करण दिखेंगे।', 'No earlier versions yet. Older versions appear here after published changes.')}</div>`;
+}
+
+// CSV template for bulk upload (open in Excel/Google Sheets, fill rows, save as CSV, import).
+const TEMPLATE_ROWS = [
+  ['', 'science', 'sc-chem', 1, 'पृथ्वी के वायुमंडल में सबसे अधिक मात्रा में कौन-सी गैस है?', 'ऑक्सीजन', 'नाइट्रोजन', 'आर्गन', 'कार्बन डाइऑक्साइड', 'B', 'वायुमंडल में लगभग 78% नाइट्रोजन और 21% ऑक्सीजन है।', 'NCERT विज्ञान', 'Which gas is the most abundant in the Earth\'s atmosphere?', 'Oxygen', 'Nitrogen', 'Argon', 'Carbon dioxide', 'The atmosphere is about 78% nitrogen and 21% oxygen.'],
+  ['', 'polity', 'p-union', 2, 'लोकसभा का सामान्य कार्यकाल कितने वर्ष का होता है?', '4', '5', '6', '7', 'B', 'अनुच्छेद 83(2) के अनुसार लोकसभा का कार्यकाल उसकी पहली बैठक से 5 वर्ष होता है।', 'भारत का संविधान, अनुच्छेद 83', '', '', '', '', '', ''],
+];
+const templateCsv = () => [CSV_COLS.join(','), ...TEMPLATE_ROWS.map(r => r.map(csvCell).join(','))].join('\n');
+function openUploadHelp() {
+  const who = P.cloud ? L('"एडमिन टीम" में जोड़े गए Google खाते', 'Google accounts added under "Admin team"') : P.mode === 'artifact' && !P.demo ? L('इस ऐप के मालिक और Share मेनू से "Editor" बनाए गए लोग', 'The owner of this app and people invited as "Editor" from the Share menu') : L('इस टेस्ट/ऑफ़लाइन संस्करण में आप (बदलाव केवल इसी ब्राउज़र में)', 'You, in this test/offline copy (changes stay in this browser)');
+  const steps = [
+    ['help', 'एक प्रश्न जोड़ें', 'Add one question', 'एडमिन → "GK प्रश्न बैंक" → "नया प्रश्न जोड़ें"। हिंदी प्रश्न, चार विकल्प, सही उत्तर, व्याख्या, अध्याय, कठिनाई और "क्यों गलत" नोट भरें; English भाग वैकल्पिक है।', 'Admin → "GK question bank" → "Add a new question". Fill in the Hindi question, four options, the right answer, explanation, chapter, difficulty and "why it\'s wrong" notes; the English part is optional.'],
+    ['download', 'Excel/CSV से एक साथ कई प्रश्न', 'Many questions at once from Excel/CSV', 'एडमिन → "आयात / निर्यात" → "टेम्पलेट डाउनलोड करें"। Excel या Google Sheets में पंक्तियाँ भरें, CSV के रूप में सहेजें, फ़ाइल चुनें → "जाँचें" → "समीक्षा में भेजें"। (एक बार में 500 तक)', 'Admin → "Import / export" → "Download template". Fill rows in Excel or Google Sheets, save as CSV, choose the file → "Check" → "Send to review". (Up to 500 at a time)'],
+    ['sparkles', 'AI से प्रश्न बनवाएँ', 'Generate questions with AI', 'एडमिन → "AI से प्रश्न बनवाएँ" → कोई ख़बर, दिवस या अपना पाठ चुनें → "प्रश्न बनाएँ" → अच्छे प्रश्न चुनकर समीक्षा में भेजें। (claude.ai संस्करण में, या जब AI एंडपॉइंट सेट हो)', 'Admin → "Generate questions with AI" → choose a story, a day or your own text → "Generate" → pick the good ones and send them to review. (In the claude.ai version, or when an AI endpoint is set)'],
+    ['newspaper', 'करेंट अफेयर्स', 'Current affairs', 'एडमिन → "आज के समाचार देखें" → शीर्षक, सारांश, तथ्य, स्रोत भरें (या मूल लेख पेस्ट करके "AI से भरें") → "समीक्षा के लिए भेजें"।', 'Admin → "Today\'s news" → fill in the title, summary, facts and source (or paste the original article and use "Fill with AI") → "Send for review".'],
+    ['calendar', 'आज का दिन', 'Today in History', 'एडमिन → "आज का दिन" → "नया दिवस जोड़ें" → तारीख़, नाम, इतिहास, तथ्य भरें।', 'Admin → "Today in History" → "Add an important day" → date, name, history and facts.'],
+    ['shield', 'जाँच और प्रकाशन', 'Review and publish', '"सामग्री की जाँच करें" में स्वचालित जाँच देखें, तीनों बिंदु टिक करें, "स्वीकृत करें" → "प्रकाशित करें" में तारीख़ चुनकर प्रकाशित करें। प्रकाशित होते ही सभी विद्यार्थियों को दिखेगा।', 'In "Review content" read the automated checks, tick all three items, "Approve" → in "Publish" pick a date and publish. Students see it as soon as it is published.'],
+  ];
+  openSheet(`${sheetHead(`${ic('help')} ${L('सामग्री कैसे अपलोड करें', 'How to upload content')}`)}
+  <p class="small" style="margin:0"><b>${L('कौन अपलोड कर सकता है', 'Who can upload')}:</b> ${esc(who)}</p>
+  <ol class="earn" style="counter-reset:none">${steps.map(([i, hi, en, dh, de]) => `<li><span class="earn-ic">${ic(i)}</span><span class="row-main"><b>${L(hi, en)}</b><span class="row-sub">${esc(L(dh, de))}</span></span></li>`).join('')}</ol>
+  <div class="grid2"><button class="btn btn-outline" data-act="template">${ic('download')} ${L('टेम्पलेट', 'Template')}</button><a class="btn btn-cta" href="#admin-io">${ic('plus')} ${L('आयात खोलें', 'Open import')}</a></div>`, { label: L('सामग्री कैसे अपलोड करें', 'How to upload content') });
+}
+
+// Admin team (self-hosted app): Google emails listed in Firestore `admins/{email}`; the owner adds or removes them.
+const TEAM = { list: [], state: 'idle' };
+async function loadTeam() {
+  if (!P.cloud || !P.cdb) return;
+  TEAM.state = 'loading';
+  try { const snap = await P.cdb.collection('admins').get(); TEAM.list = snap.docs.map(d => ({ ...(d.data() || {}), email: d.id })); TEAM.state = 'ok'; }
+  catch { TEAM.state = 'error'; }
+  if (route === 'admin-team') render();
+}
+function vAdminTeam() {
+  if (!P.isAdmin) return vNoAdmin();
+  if (!P.cloud) {
+    return `${adminBar(L('एडमिन टीम', 'Admin team'))}
+<main class="page gutter"><section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('users')} ${L('एडमिन कैसे जोड़ें', 'How to add admins')}</h2>
+  <p style="margin:0">${P.mode === 'artifact' && !P.demo ? L('इस claude.ai संस्करण में एडमिन वे लोग हैं जिन्हें आप पेज के Share मेनू से "Editor" की पहुँच देते हैं। उन्हें यही एडमिन पैनल दिखेगा।', 'In this claude.ai version, admins are the people you give "Editor" access from the page\'s Share menu. They see this same admin panel.')
+    : L('इस टेस्ट/ऑफ़लाइन संस्करण में हर कोई एडमिन है और बदलाव केवल उसी ब्राउज़र में रहते हैं। असली ऐप में Google साइन-इन चालू करने के बाद यहाँ ईमेल से एडमिन जोड़ें (docs/FIREBASE-SETUP.md)।', 'In this test/offline copy everyone is an admin and changes stay in that browser. In the real app, turn on Google sign-in and then add admins here by email (docs/FIREBASE-SETUP.md).')}</p></section></main>`;
+  }
+  if (TEAM.state === 'idle') setTimeout(loadTeam, 0);
+  const me = (P.authUser || {}).email;
+  return `${adminBar(L('एडमिन टीम', 'Admin team'))}
+<main class="page gutter">
+  <div class="note">${ic('info')}<div>${L('यहाँ जोड़े गए Google खाते साइन इन करते ही एडमिन पैनल खोल सकते हैं — प्रश्न, समाचार और दिवस जोड़ना, समीक्षा और प्रकाशन। केवल मालिक एडमिन जोड़ या हटा सकता है।', 'Google accounts added here open the admin panel as soon as they sign in — adding questions, news and days, review and publishing. Only the owner can add or remove admins.')}</div></div>
+  <section class="sec"><h2 class="sec-title">${ic('users')} ${L('एडमिन', 'Admins')} ${TEAM.state === 'ok' ? `(${TEAM.list.length})` : ''}</h2>
+    <div class="list">${TEAM.state === 'loading' || TEAM.state === 'idle' ? skeletonRows(2) : TEAM.state === 'error' ? `<div class="empty">${L('सूची लोड नहीं हुई।', 'Could not load the list.')}</div>` : TEAM.list.map(a => `<div class="row"><span class="row-main"><span class="row-title" style="font-size:.98rem">${esc(a.email)}${a.email === me ? ` <span class="tag tag-live">${L('आप', 'You')}</span>` : ''}</span><span class="row-sub">${a.owner ? L('मालिक', 'Owner') : L('एडमिन', 'Admin')}${a.by ? ` · ${L('जोड़ा', 'added by')} ${esc(a.by)}` : ''}</span></span>${P.owner && !a.owner && a.email !== me ? `<button class="iconbtn" style="color:var(--bad)" data-act="team-remove" data-email="${esc(a.email)}" aria-label="${L('हटाएँ', 'Remove')}">${ic('trash')}</button>` : ''}</div>`).join('')}</div></section>
+  ${P.owner ? `<form class="card" data-form="team-add" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1rem">${ic('plus')} ${L('एडमिन जोड़ें', 'Add an admin')}</h2><div class="field"><label for="team-email">${L('Google ईमेल', 'Google email')}</label><input class="input" id="team-email" type="email" inputmode="email" autocomplete="off" placeholder="name@gmail.com" maxlength="120"></div><button class="btn btn-cta" type="submit">${ic('check')} ${L('जोड़ें', 'Add')}</button></form>` : `<p class="small muted" style="margin:0">${L('एडमिन जोड़ने या हटाने के लिए मालिक से कहें।', 'Ask the owner to add or remove admins.')}</p>`}
+</main>`;
 }

@@ -85,3 +85,4 @@ https://claude.ai/artifact/TYUHLNaspNcibKAUdXz7DY with `files` = data/*.json (ke
 - Overnight — M1 done and pushed; the session paused (usage limit) during M2.
 - 05:41 IST — resumed after the reset; finished M2–M7.
 - 06:10 IST — all suites pass (standalone, artifact runtime, tester build, v2, v3 flows, 360px smoke in hi/en × light/dark); main app published as Version 5, tester build as Version 3.
+- 10:15 IST — Google sign-in (Firebase Auth + Firestore) for the self-hosted app, admin team by email, upload help, CSV template, admin guide and Firebase setup guide.

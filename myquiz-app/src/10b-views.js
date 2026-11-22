@@ -173,7 +173,8 @@ function lbPeriod(kind) {
 function lbNotes() {
   const out = [];
   if (P.demo) out.push(`<div class="note">${ic('info')}<div>${L('टेस्ट संस्करण: "(उदाहरण)" वाले नाम नमूना विद्यार्थी हैं, ताकि आप लीडरबोर्ड आज़मा सकें।', 'Test build: names marked "(sample)" are example students so you can try the leaderboard.')}</div></div>`);
-  else if (P.mode === 'standalone') out.push(`<div class="note">${ic('info')}<div>${L('यह ऑफ़लाइन संस्करण है — यहाँ सिर्फ़ आपके पॉइंट्स दिखते हैं। ऑनलाइन संस्करण में सभी विद्यार्थियों की रैंकिंग बनती है।', 'This is the offline copy, so only your own points appear here. The online version ranks every student.')}</div></div>`);
+  else if (P.cloud && !P.uid) out.push(`<div class="note">${ic('user')}<div>${L('लीडरबोर्ड में जुड़ने के लिए Google से साइन इन करें।', 'Sign in with Google to join the leaderboard.')}<br><button class="link" data-act="google-signin">${L('साइन इन करें', 'Sign in')} ${ic('arrow-right')}</button></div></div>`);
+  else if (P.mode === 'standalone' && !P.cloud) out.push(`<div class="note">${ic('info')}<div>${L('यह ऑफ़लाइन संस्करण है — यहाँ सिर्फ़ आपके पॉइंट्स दिखते हैं। ऑनलाइन संस्करण में सभी विद्यार्थियों की रैंकिंग बनती है।', 'This is the offline copy, so only your own points appear here. The online version ranks every student.')}</div></div>`);
   else if (LB.denied || !P.uid) out.push(`<div class="note note-warn">${ic('alert')}<div>${L('आपके पॉइंट्स इस लीडरबोर्ड पर नहीं भेजे जा सके (अनुमति नहीं है)। आपके पॉइंट्स आपकी प्रोफ़ाइल में सुरक्षित हैं।', 'Your points could not be added to this leaderboard (no permission). They are still saved in your profile.')}</div></div>`);
   else if (LB.state === 'error') out.push(`<div class="note note-warn">${ic('alert')}<div>${L('लीडरबोर्ड लोड नहीं हुआ। थोड़ी देर बाद फिर देखें।', 'The leaderboard did not load. Check again in a little while.')}</div></div>`);
   if (U.s.lb.hide) out.push(`<div class="note">${ic('lock')}<div>${L('आपने ख़ुद को लीडरबोर्ड से छिपाया है। ', 'You have hidden yourself from the leaderboard. ')}<a class="link" href="#profile">${L('प्रोफ़ाइल में बदलें', 'Change in Profile')}</a></div></div>`);
@@ -266,6 +267,7 @@ function vProfile() {
   const lbName = lbForm.name ?? s.lb.name;
   return `${appbar(`${ic('user')} ${L('प्रोफ़ाइल और सेटिंग्स', 'Profile & settings')}`, { back: 'home' })}
 <main class="page gutter">
+  ${accountCard()}
   <section class="card admin-hero" style="display:flex;align-items:center;gap:14px">
     <span class="avatar" style="width:58px;height:58px;font-size:1.5rem">${name ? esc(initial(name)) : ic('user')}</span>
     <span class="row-main"><span class="row-title" style="font-size:1.2rem">${name ? esc(name) : L('विद्यार्थी', 'Student')}</span><span class="row-sub" style="color:rgba(255,255,255,.85)">${s.exam ? `${L('लक्ष्य', 'Target')}: ${esc(examLabel(s.exam))}` : L('लक्ष्य परीक्षा चुनें', 'Choose a target exam')} · ${L(`रोज़ ${s.goal} प्रश्न`, `${s.goal} questions a day`)}</span></span>

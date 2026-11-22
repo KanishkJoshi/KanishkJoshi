@@ -6,7 +6,7 @@ function vNoAdmin() {
 const ADMIN_ROUTES = new Set(['admin', 'admin-ai', 'admin-review', 'admin-publish', 'admin-bank', 'admin-news', 'admin-days', 'admin-rewards', 'admin-translate', 'admin-analytics', 'admin-io']);
 function cmsNote() {
   if (P.demo) return `<div class="note">${ic('info')}<div>${L('<b>टेस्ट संस्करण:</b> यहाँ किए बदलाव केवल आपके ब्राउज़र में सहेजे जाते हैं — बेझिझक आज़माएँ। असली ऐप पर कोई असर नहीं होगा।', '<b>Test build:</b> changes here are saved only in your browser, so try anything. The real app is not affected.')}</div></div>`;
-  if (P.mode === 'standalone') return `<div class="note">${ic('info')}<div>${L('<b>डेमो मोड:</b> यहाँ किए बदलाव केवल इसी ब्राउज़र में सहेजे जाते हैं। असली ऐप में यही पैनल सर्वर से जुड़ेगा।', '<b>Demo mode:</b> changes here are saved only in this browser. In the real app this panel connects to the server.')}</div></div>`;
+  if (P.mode === 'standalone' && !P.cloud) return `<div class="note">${ic('info')}<div>${L('<b>डेमो मोड:</b> यहाँ किए बदलाव केवल इसी ब्राउज़र में सहेजे जाते हैं। असली ऐप में यही पैनल सर्वर से जुड़ेगा।', '<b>Demo mode:</b> changes here are saved only in this browser. In the real app this panel connects to the server.')}</div></div>`;
   if (C.cmsState === 'loading') return `<div class="note">${ic('clock')}<div>${L('ड्राफ़्ट लोड हो रहे हैं…', 'Loading drafts…')}</div></div>`;
   if (C.cmsState === 'slow' || C.cmsState === 'error') return `<div class="note note-warn">${ic('alert')}<div>${L('सर्वर से ड्राफ़्ट अभी नहीं मिल पाए। दिख रही जानकारी पुरानी हो सकती है।', 'Drafts could not be loaded from the server yet. What you see may be out of date.')}</div></div>`;
   return '';
@@ -41,6 +41,7 @@ function vAdmin() {
     <div class="pipeline"><div class="pipe"><b>${newsWeek}</b>${L('स्रोत समाचार', 'Source news')}</div><div class="pipe"><b>${aiPending}</b>${L('AI ड्राफ़्ट', 'AI drafts')}</div><div class="pipe"><b>${pending.length}</b>${L('समीक्षा बाकी', 'To review')}</div><div class="pipe"><b>${approved}</b>${L('प्रकाशन हेतु', 'To publish')}</div></div>
     <p class="small muted" style="margin:0">${L('हर AI प्रश्न मानव समीक्षा के बाद ही विद्यार्थियों तक पहुँचता है।', 'Every AI question reaches students only after a human review.')}</p></section>
   <a class="reward" href="#admin-rewards"><span class="reward-ic">${ic('trophy')}</span><span class="row-main"><span class="row-title">${L('पुरस्कार और लीडरबोर्ड', 'Rewards & leaderboard')}</span><span class="row-sub">${L(`इस सप्ताह ${players} विद्यार्थी रैंकिंग में`, `${players} students ranked this week`)}${weekDue ? ' · ' + L('पिछले सप्ताह के विजेता घोषित करें', 'announce last week\'s winners') : ''}</span></span>${weekDue ? '<span class="cnt">1</span>' : ''}${ic('chev-right', 'chev')}</a>
+  <button class="act" data-act="upload-help"><span class="ai">${ic('help')}</span><span>${L('सामग्री कैसे अपलोड करें?', 'How do I upload content?')}<span class="row-sub">${L('प्रश्न, CSV/Excel, समाचार और दिवस — चरण-दर-चरण', 'Questions, CSV/Excel, news and days — step by step')}</span></span>${ic('chev-right', 'chev')}</button>
   <h3 class="sec-title">${ic('sliders')} ${L('आपके कार्य के विकल्प', 'Your tools')}</h3>
   <div class="actions2">
     ${act('admin-news', 'newspaper', L('आज के समाचार देखें', 'Today\'s news'))}
@@ -52,6 +53,7 @@ function vAdmin() {
     ${act('admin-translate', 'languages', L('अनुवाद प्रबंधन', 'Translations'), missingEn().length)}
     ${act('admin-analytics', 'chart', L('विश्लेषण', 'Analytics'))}
     ${act('admin-io', 'download', L('आयात / निर्यात', 'Import / export'))}
+    ${act('admin-team', 'users', L('एडमिन टीम', 'Admin team'))}
   </div>
   <button class="switch" data-act="cms-foureyes" role="switch" aria-checked="${CMSSET.fourEyes}"><span class="row-main"><b>${L('दूसरे संपादक की मंज़ूरी ज़रूरी', 'Require a second editor\'s approval')}</b><span class="row-sub">${L('ड्राफ़्ट बनाने वाला संपादक उसे ख़ुद स्वीकृत नहीं कर सकेगा (केवल मालिक बदल सकता है)। आपकी भूमिका: ', 'The editor who created a draft cannot approve it (owner only). Your role: ')}${LOCAL() ? L('डेमो', 'demo') : P.owner ? L('मालिक', 'owner') : L('संपादक', 'editor')}</span></span><span class="knob" aria-hidden="true"></span></button>
 </main>`;

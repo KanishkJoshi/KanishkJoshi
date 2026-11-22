@@ -50,7 +50,8 @@ const U = {
       P.progressRemote = true;
       if (snap.exists) {
         const r = this.norm(clone(snap.data()));
-        if ((r.updatedAt || 0) > (this.s.updatedAt || 0)) { this.s = r; LS.set('progress', this.s); applySettings(); scheduleRender(); }
+        const blank = x => !Object.keys(x.ans).length && !x.pts.total && !x.mocks.length;
+        if ((r.updatedAt || 0) > (this.s.updatedAt || 0) || (blank(this.s) && !blank(r))) { this.s = r; LS.set('progress', this.s); applySettings(); scheduleRender(); }
         else if ((this.s.updatedAt || 0) > (r.updatedAt || 0)) this.queue();
       } else if (this.s.updatedAt) this.queue();
     } catch { P.progressRemote = false; }
@@ -62,7 +63,7 @@ const U = {
     if (this.busy) { this.again = true; return; }
     this.busy = true;
     try { await P.cdb.doc(`data/users/${P.uid}/progress`).set(clone(this.s)); }
-    catch (e) { if (e && ['invalid_argument', 'not_granted', 'revoked', 'capability_disabled', 'capability_removed', 'quota_exceeded'].includes(e.code)) P.progressRemote = false; }
+    catch (e) { if (e && ['invalid_argument', 'not_granted', 'revoked', 'capability_disabled', 'capability_removed', 'permission-denied', 'unauthenticated', 'quota_exceeded'].includes(e.code)) P.progressRemote = false; }
     finally { this.busy = false; if (this.again) { this.again = false; this.flush(); } }
   },
   prune() {

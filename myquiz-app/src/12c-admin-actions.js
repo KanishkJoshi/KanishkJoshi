@@ -55,3 +55,28 @@ Object.assign(ACTIONS, {
     render();
   },
 });
+// Sign-in, sign-out, upload help and the admin team (self-hosted app with Google sign-in)
+Object.assign(ACTIONS, {
+  'google-signin': () => signInGoogle(),
+  signout: () => confirmSheet(L('साइन आउट करें?', 'Sign out?'), L('आपकी प्रगति आपके Google खाते में सुरक्षित रहेगी। इस फ़ोन से स्थानीय डेटा हटा दिया जाएगा।', 'Your progress stays safe in your Google account. Local data on this phone will be cleared.'), L('साइन आउट', 'Sign out'), () => signOutAll(), false),
+  guest: () => { FB.guest = true; LS.set('guest', true); subscribeLive(); go(U.s.onb ? 'home' : 'welcome'); },
+  reload: () => location.reload(),
+  'upload-help': () => openUploadHelp(),
+  template: () => saveFile('myquiz-question-template.csv', '\ufeff' + templateCsv(), 'text/csv'),
+  'team-remove': el => {
+    const email = el.dataset.email;
+    confirmSheet(L('एडमिन हटाएँ?', 'Remove this admin?'), esc(email), L('हटाएँ', 'Remove'), async () => {
+      try { await P.cdb.doc('admins/' + email).delete(); toast(L('एडमिन हटाया गया', 'Admin removed')); loadTeam(); } catch (e) { toast(dbMsg(e), 'err'); }
+    });
+  },
+});
+Object.assign(FORMS, {
+  'team-add': async f => {
+    const email = String(($('#team-email', f) || {}).value || '').trim().toLowerCase();
+    if (!/^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(email)) { toast(L('सही ईमेल लिखें।', 'Enter a valid email.'), 'err'); return; }
+    const btn = f.querySelector('button[type="submit"]'); btn.disabled = true;
+    try { await P.cdb.doc('admins/' + email).set({ owner: false, by: (P.authUser || {}).email || '', at: Date.now() }); toast(L(`${email} अब एडमिन है`, `${email} is now an admin`)); loadTeam(); }
+    catch (e) { btn.disabled = false; toast(dbMsg(e), 'err'); }
+  },
+});
+

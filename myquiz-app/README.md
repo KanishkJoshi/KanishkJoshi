@@ -21,6 +21,8 @@ into a personalised learning app around **Learn → Practise → Understand → 
 - **Live demo** (claude.ai artifact; private until you share it from its Share menu): https://claude.ai/artifact/7nKiG4QDwQbLCMCWm91XfR
 - **Design review, competitor references and roadmap**: https://claude.ai/artifact/WAhSbCYv6oe3Le5PULqniZ
 - **Tester build (demo)** to share with testers: https://claude.ai/artifact/TYUHLNaspNcibKAUdXz7DY (see [Tester build](#tester-build-demo))
+- **Google sign-in for your own website/app:** [docs/FIREBASE-SETUP.md](docs/FIREBASE-SETUP.md) (one-time, about 20 minutes)
+- **How admins upload content (Hindi + English):** [docs/ADMIN-GUIDE.md](docs/ADMIN-GUIDE.md) and the [CSV template](docs/question-template.csv)
 - Everything in this folder runs as-is on any static host and no framework is needed. `app.js` is assembled from `src/*.js` by `python3 tools/build.py`; run that after editing anything in `src/`.
 
 ## Run it locally
@@ -59,7 +61,10 @@ myquiz-app/
 ├── src/                  01-constants … 14-router-boot: content store, progress, engines, views, admin, tester
 ├── tools/                build.py, build_artifact.py, content/ (scripts that enriched the question and news data)
 ├── tests/                run-all.sh + Playwright suites (standalone, artifact mock, tester build, v2/v3 features, smoke)
-├── docs/PLAN-v3.md       analysis, priorities and status of the v3 brief
+├── docs/                 PLAN-v3.md (v3 brief status), FIREBASE-SETUP.md, ADMIN-GUIDE.md, question-template.csv
+├── config.js             your settings (Firebase for Google sign-in, AI endpoint) — self-hosted app only
+├── firestore.rules       database security rules for the Google sign-in version; firebase.json deploys both
+├── vendor/               Firebase JS SDK 10.12.2 (loaded only when Google sign-in is configured)
 ├── data/questions.json   95 questions: chapter, difficulty, explanation, why each wrong option is wrong, background, reference (Hindi + `en`)
 ├── data/news.json        8 real current-affairs items (Sep–Nov 2026) with source, details, why it matters, background, schemes, organisations (Hindi + `en`)
 ├── data/days.json        95 important days across the year: history, purpose, exam facts (Hindi + `en`)
@@ -84,6 +89,16 @@ myquiz-app/
 | AI | optional: your endpoint (below) | Claude, through the artifact runtime |
 
 **Learner progress** stores, per question: correct and wrong counts, last result, and a Leitner box with a due date (0/1/3/7/14/30 days). It also keeps daily counts (goal ring and streak, which needs ≥ 5 answers/day), points per day, badges, bookmarks, mock history and settings (including language).
+
+## Google sign-in (self-hosted app)
+
+With a Firebase config in `config.js`, the app opens on a **"Continue with Google"** screen. Nothing else opens until the student signs in (optionally `allowGuest: true` adds "Continue without signing in").
+- **Storage:** Firebase Auth handles the Google account and Firestore replaces this browser's storage. Progress, leaderboard, error reports and everything admins publish are online, so students get new content live.
+- **Profile:** shows the Google account, the role (student/admin/owner) and **Sign out**. Signing out clears the phone. A second account on the same phone starts fresh and never sees the first student's progress.
+- **Admins:** Google emails listed in Firestore `admins/{email}`. The owner is set once in the console; after that the owner manages the **Admin team** inside the app.
+- **Security:** [`firestore.rules`](firestore.rules) lets students read and write only their own progress. The leaderboard accepts only a name and point totals within daily limits, and only admins publish or see drafts and reports.
+- **SDK:** the Firebase JS SDK 10.12.2 is bundled in `vendor/` (Apache-2.0) and loaded only when configured. `firebase.json` deploys the app and the rules to Firebase Hosting.
+- **claude.ai versions:** they keep using claude.ai's own sign-in, because Google sign-in cannot run inside a claude.ai page.
 
 ## Language (हिंदी / English)
 
@@ -111,6 +126,9 @@ myquiz-app/
 **Important (claude.ai version):** claude.ai only lets people with *Contributor* access or higher write to an artifact's database. Viewers can play, but their points stay on their device and don't reach the shared leaderboard (the app tells them so). That's fine for a pilot with your team or a small batch. For thousands of real students, use the production backend below.
 
 ## Admin workflow
+
+Step-by-step guide for your content team, in Hindi and English: [docs/ADMIN-GUIDE.md](docs/ADMIN-GUIDE.md). The admin panel's **"How do I upload content?"** button shows the same steps.
+
 
 1. **Source**: pick a current-affairs item or an important day, or paste any article.
 2. **AI drafts** MCQs. The prompt forbids facts that aren't in the source text, and malformed output (wrong option count, duplicate options, bad answer index) is dropped automatically.

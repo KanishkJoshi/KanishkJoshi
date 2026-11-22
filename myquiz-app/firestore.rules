@@ -1,0 +1,59 @@
+rules_version = '2';
+// MY QUIZ — Firestore security rules (Google sign-in). Deploy with `firebase deploy --only firestore:rules`
+// or paste into Firebase console → Firestore Database → Rules.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function email() { return request.auth.token.email.lower(); }
+    function adminPath() { return /databases/$(database)/documents/admins/$(email()); }
+    function isAdmin() { return signedIn() && request.auth.token.email_verified == true && exists(adminPath()); }
+    function isOwner() { return isAdmin() && get(adminPath()).data.get('owner', false) == true; }
+    function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // Admin team: documents named by lowercase Google email. The first owner is created once in the console
+    // (admins/<your email> with owner = true); after that the owner manages the team inside the app.
+    match /admins/{e} {
+      allow get: if signedIn() && (email() == e || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isOwner();
+    }
+
+    // Published questions, news, days, prizes, winners and settings: everyone reads, admins write.
+    match /pub/{coll}/items/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Drafts waiting for review and version history: admins only.
+    match /cms/{rest=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Error reports: each learner keeps one document with their recent reports; admins read and resolve them.
+    match /reports/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create, update: if isAdmin()
+        || (isSelf(uid) && request.resource.data.keys().hasOnly(['items']) && request.resource.data.items.size() <= 50);
+      allow delete: if isAdmin();
+    }
+
+    // Private progress (answers, points, settings): only the learner.
+    match /data/users/{uid}/{doc} {
+      allow read, write: if isSelf(uid);
+    }
+
+    // Leaderboard: display name and point totals only. Learners write their own entry; admins can remove one.
+    match /lb/{uid} {
+      allow read: if signedIn();
+      allow create, update: if isSelf(uid)
+        && request.resource.data.keys().hasOnly(['n', 'wk', 'wp', 'pw', 'pwp', 'mo', 'mp', 'pm', 'pmp', 'tp', 'at'])
+        && request.resource.data.n is string && request.resource.data.n.size() <= 30
+        && request.resource.data.wp is number && request.resource.data.wp >= 0 && request.resource.data.wp <= 4200
+        && request.resource.data.pwp is number && request.resource.data.pwp >= 0 && request.resource.data.pwp <= 4200
+        && request.resource.data.mp is number && request.resource.data.mp >= 0 && request.resource.data.mp <= 18600
+        && request.resource.data.pmp is number && request.resource.data.pmp >= 0 && request.resource.data.pmp <= 18600
+        && request.resource.data.tp is number && request.resource.data.tp >= 0;
+      allow delete: if isSelf(uid) || isAdmin();
+    }
+  }
+}

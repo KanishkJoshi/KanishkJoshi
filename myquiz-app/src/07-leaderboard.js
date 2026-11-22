@@ -28,7 +28,7 @@ const LB = {
       if (U.s.lb.hide || U.s.pts.total <= 0) await ref.delete();
       else await ref.set(clone(this.myEntry()));
     } catch (e) {
-      if (e && ['invalid_argument', 'not_granted', 'revoked', 'capability_disabled', 'capability_removed'].includes(e.code)) this.denied = true;
+      if (e && ['invalid_argument', 'not_granted', 'revoked', 'capability_disabled', 'capability_removed', 'permission-denied', 'unauthenticated'].includes(e.code)) this.denied = true;
     } finally { this.busy = false; if (this.again) { this.again = false; this.push(); } }
   },
   subscribe() {
