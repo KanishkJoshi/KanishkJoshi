@@ -3,7 +3,7 @@ const CFG = window.MYQUIZ_CONFIG || {};
 // Tester build (demo): content, progress and admin changes stay in this browser, and a bug reporter
 // plus a guided test plan are added. Enable with MYQUIZ_CONFIG.demo or ?demo=1 on a static host.
 const DEMO = !!CFG.demo || /[?&]demo(=1|=true)?(&|$)/.test(location.search);
-const BUILD = String(CFG.build || 'v3.0');
+const BUILD = String(CFG.build || 'v4.0');
 const P = {
   mode: window.claude && typeof window.claude.use === 'function' ? 'artifact' : 'standalone',
   demo: DEMO,

@@ -40,6 +40,7 @@ function render(routeChanged = false) {
   app.innerHTML = (navigator.onLine === false ? `<div class="offline" role="status">${ic('wifi-off')} ${L('आप ऑफ़लाइन हैं — अभ्यास जारी रखें, प्रगति बाद में सिंक होगी।', 'You are offline — keep practising; progress syncs later.')}</div>` : '') + (authGate() || ROUTES[route] || vHome)();
   app.classList.toggle('no-nav', NO_NAV.has(route) || !!authGate());
   app.classList.toggle('exam-pad', route === 'exam');
+  app.classList.toggle('enter', !!routeChanged);
   if (routeChanged) window.scrollTo(0, 0);
   if (DEMO) renderDemoStrip();
   afterRender();

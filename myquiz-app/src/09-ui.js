@@ -17,6 +17,18 @@ function topbar(title) {
     <a class="iconbtn" href="#profile" aria-label="${L('प्रोफ़ाइल और सेटिंग्स', 'Profile and settings')}"><span class="avatar">${name ? esc(initial(name)) : ic('user')}</span></a>
   </div></header>`;
 }
+// A short burst of confetti for a strong result (skipped when the learner prefers less motion).
+function celebrate() {
+  if (reducedMotion()) return;
+  const cols = ['#FFC727', '#22C55E', '#3B82F6', '#EC4899', '#8B5CF6', '#F97316'];
+  const box = document.createElement('div');
+  box.className = 'confetti'; box.setAttribute('aria-hidden', 'true');
+  box.innerHTML = Array.from({ length: 44 }, (_, i) => `<i style="--x:${(i * 37 + 7) % 100}%;--c:${cols[i % cols.length]};--r:${(i * 53) % 360}deg;--dx:${((i * 29) % 120) - 60}px;--d:${((i * 7) % 10) / 20}s;--t:${(2.2 + ((i * 13) % 10) / 10).toFixed(1)}s"></i>`).join('');
+  document.body.appendChild(box);
+  setTimeout(() => box.remove(), 4300);
+}
+// Gold trophy for the result screen.
+const TROPHY = '<svg class="trophy" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="trg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE38A"/><stop offset="1" stop-color="#F59E0B"/></linearGradient></defs><path d="M18 12H10a2 2 0 0 0-2 2c0 7 5 12 12 12M46 12h8a2 2 0 0 1 2 2c0 7-5 12-12 12" fill="none" stroke="#F5B400" stroke-width="4" stroke-linecap="round"/><path d="M17 7h30v15a15 15 0 0 1-30 0z" fill="url(#trg)"/><path d="m32 12 2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8z" fill="#fff" opacity=".92"/><rect x="28" y="36" width="8" height="9" fill="#E39400"/><rect x="19" y="45" width="26" height="9" rx="3" fill="url(#trg)"/></svg>';
 function ring(p, size, stroke, color = 'var(--ring)') {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r, off = c * (1 - clamp(p, 0, 1)), h = size / 2;
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true"><circle cx="${h}" cy="${h}" r="${r}" fill="none" style="stroke:var(--ring-track)" stroke-width="${stroke}"/><circle cx="${h}" cy="${h}" r="${r}" fill="none" style="stroke:${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" transform="rotate(-90 ${h} ${h})"/></svg>`;

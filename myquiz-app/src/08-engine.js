@@ -62,6 +62,7 @@ function answer(sel) {
   S.ans[q.id] = { sel, ok, ms, pts: earned };
   S.pts += earned;
   S.bonus.push(...(U.lastBonus || []));
+  S.justAt = Date.now();
   saveSession();
   render();
   const o = qO(q);
@@ -93,6 +94,8 @@ function finishSession() {
     LB.queue();
   }
   go('result');
+  const okN = S.qs.filter(q => S.ans[q.id] && S.ans[q.id].ok).length;
+  if (S.qs.length >= 3 && okN / S.qs.length >= 0.7) celebrate();
 }
 
 // ───────────────────────────── mock exams ─────────────────────────────

@@ -45,7 +45,7 @@ function vExam() {
   if (!q) { setTimeout(() => examMove(E.i + 1 < E.qs.length ? E.i + 1 : 0), 0); return ''; }
   const st = E.st[id] || {}, n = E.qs.length;
   const remaining = Math.max(0, E.endsAt - Date.now());
-  const opts = qO(q).map((o, i) => `<button class="opt ${st.sel === i ? 'sel' : ''}" data-act="exam-sel" data-i="${i}" aria-pressed="${st.sel === i}"><span class="key">${LETTERS[i]}.</span><span class="txt">${esc(o)}</span></button>`).join('');
+  const opts = qO(q).map((o, i) => `<button class="opt ${st.sel === i ? 'sel' : ''}" data-act="exam-sel" data-i="${i}" aria-pressed="${st.sel === i}"><span class="key">${LETTERS[i]}</span><span class="txt">${esc(o)}</span></button>`).join('');
   return `<header class="exambar"><div class="exambar-in gutter">
     <button class="iconbtn" data-act="exam-exit" aria-label="${L('परीक्षा से बाहर जाएँ', 'Leave the test')}">${ic('x')}</button>
     <span class="t">${esc(examTitle(E))}</span>

@@ -45,7 +45,7 @@ function vPlay() {
       if (i === q.a) { cls = 'ok'; mark = `<span class="mark">${ic('check')}</span>`; }
       else if (i === a.sel) { cls = 'bad'; mark = `<span class="mark">${ic('x')}</span>`; }
     }
-    return `<button class="opt ${cls}" data-act="answer" data-i="${i}" ${a ? 'disabled' : ''}><span class="key">${LETTERS[i]}.</span><span class="txt">${esc(x)}</span>${mark}</button>`;
+    return `<button class="opt ${cls}" data-act="answer" data-i="${i}" ${a ? 'disabled' : ''}><span class="key">${LETTERS[i]}</span><span class="txt">${esc(x)}</span>${mark}</button>`;
   }).join('');
   const bm = U.isBm('q', q.id);
   const last = S.i === n - 1;
@@ -57,7 +57,7 @@ function vPlay() {
     <div class="qmeta"><span class="tag">${esc(subjName(q.s))} · ${esc(chName(chOf(q)))}</span>${diffBars(q.d)}<span class="qmeta-r">${S.pts ? ptsChip(S.pts) : ''}${timer}</span></div>
   </div>
   <h2 class="qtext">${esc(qT(q))}</h2>
-  <div class="opts" role="group" aria-label="${L('विकल्प', 'Options')}">${opts}</div>
+  <div class="opts${a && S.justAt && Date.now() - S.justAt < 700 ? ' fresh' : ''}" role="group" aria-label="${L('विकल्प', 'Options')}">${opts}</div>
   ${a ? explainBox(q, a) : ''}
   <div class="qtools">
     <button class="btn btn-sm btn-outline" data-act="bm-q" data-id="${esc(q.id)}" aria-pressed="${bm}">${ic('bookmark', bm ? 'fill' : '')} ${bm ? L('सहेजा गया', 'Saved') : L('बुकमार्क', 'Save')}</button>
@@ -88,7 +88,7 @@ function vResult() {
   return `${appbar(L('परिणाम', 'Result'), { back: S.back })}
 <main class="page gutter">
   <section class="card result-hero">
-    <div class="big-ring">${ring(p, 150, 12, p >= 0.5 ? 'var(--ring)' : 'var(--bad-solid)')}<b class="tnum">${c}/${n}<small>${L('सही उत्तर', 'correct')}</small></b></div>
+    ${p >= 0.7 ? TROPHY : ''}<div class="big-ring">${ring(p, 150, 12, p >= 0.5 ? 'var(--ring)' : 'var(--bad-solid)')}<b class="tnum">${c}/${n}<small>${L('सही उत्तर', 'correct')}</small></b></div>
     <h2 style="font-family:var(--font-display);font-size:1.35rem;margin:6px 0 0">${esc(sTitle())}</h2>
     <p class="muted" style="margin:0">${msg}</p>
     <span class="pill pill-gold">${ic('coins')} +${fmtNum(S.pts)} ${L('पॉइंट्स', 'points')}</span>

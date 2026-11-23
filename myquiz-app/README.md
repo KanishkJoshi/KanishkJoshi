@@ -1,7 +1,16 @@
-# MY QUIZ — bilingual GK learning app (v3)
+# MY QUIZ — bilingual GK learning app (v4)
 
 A mobile-first, installable web app (PWA) for Indian competitive-exam students, built from the MY QUIZ design and grown
 into a personalised learning app around **Learn → Practise → Understand → Revise → Compete → Improve**.
+
+**v4 (23 Nov 2026): the client's colourful look.** The interface follows the client's six-screen vision, with a more modern finish:
+- **Look:** gradient navy-to-indigo headers, the rounded *Baloo 2* display font for Hindi and English, glowing green action buttons, soft-shadow cards and a floating bottom bar. Light and dark versions throughout.
+- **Home:** a greeting header with streak, points and rank chips, and a yellow "today" card with a green Start button. Below are four big colour tiles (Quiz, Aaj ka Din, Current Affairs, Mock Tests) and chips for today's news topics.
+- **Learn:** colourful subject icons with question-count pills, and a tip card.
+- **Quiz:** letter bubbles on options, a pop on a right answer and a shake on a wrong one, and a gradient progress bar.
+- **Result:** a trophy and confetti for scores of 70% or more.
+- **Other screens:** illustrated news thumbnails, a tear-off calendar for Aaj ka Din, a gold/silver/bronze podium, and a gradient sign-in screen.
+- **Questions:** the bank now has 155 questions, up from 95. The 60 new ones cover all six static subjects and follow the full explanation format: why each wrong option is wrong, plus a source.
 
 **v3 (22 Nov 2026)** follows the owner's 20-section improvement brief. The analysis, priorities and status are in
 [docs/PLAN-v3.md](docs/PLAN-v3.md).
@@ -56,7 +65,7 @@ Deploy by copying the folder to any static host (GitHub Pages, Netlify, Firebase
 
 ```
 myquiz-app/
-├── index.html            styles (design system v3 tokens, light + dark), icon sprite, app shell
+├── index.html            styles (v3 tokens + the v4 "vibrant" layer at the end, light + dark), icon sprite, app shell
 ├── app.js                the built app (do not edit by hand) — assembled from src/
 ├── src/                  01-constants … 14-router-boot: content store, progress, engines, views, admin, tester
 ├── tools/                build.py, build_artifact.py, content/ (scripts that enriched the question and news data)

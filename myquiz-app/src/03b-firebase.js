@@ -104,23 +104,28 @@ function vLogin() {
   if (!P.cloud) return redirect('home');
   if (FB.state === 'in' || (FB.guest && FB.state === 'out')) return redirect(U.s.onb ? 'home' : 'welcome');
   const waiting = FB.state === 'loading', off = navigator.onLine === false;
-  return `<main class="onb-page gutter login">
-  <div class="chips" style="justify-content:flex-end" role="group" aria-label="${L('भाषा', 'Language')}">${[['hi', 'हिंदी'], ['en', 'English']].map(([v, l]) => `<button class="chip" data-act="set-lang" data-v="${v}" aria-pressed="${LANG === v}" lang="${v}">${l}</button>`).join('')}</div>
-  <svg class="illus" viewBox="0 0 120 120" role="img" aria-label="${L('किताब और टोपी', 'A book and a graduation cap')}"><circle cx="60" cy="60" r="56" fill="var(--sky-soft)"/><path d="M28 78l32-12 32 12v8l-32-12-32 12z" fill="var(--navy)"/><path d="M60 30 24 46l36 16 36-16z" fill="var(--navy)"/><path d="M40 54v14c0 6 9 10 20 10s20-4 20-10V54" fill="none" stroke="var(--sky)" stroke-width="5"/><circle cx="92" cy="50" r="4" fill="var(--gold)"/></svg>
-  <div><h1>MY QUIZ</h1><p class="lead">${L('हिंदी और English में सामान्य ज्ञान — सीखें, अभ्यास करें, दोहराएँ और मुक़ाबला करें।', 'General knowledge in Hindi and English — learn, practise, revise and compete.')}</p></div>
-  <ul class="facts">
-    <li>${ic('check')}<span>${L('आपकी प्रगति हर फ़ोन और कंप्यूटर पर सुरक्षित', 'Your progress is saved on every phone and computer')}</span></li>
-    <li>${ic('check')}<span>${L('रोज़ की चुनौती, साप्ताहिक लीडरबोर्ड और इनाम', 'Daily challenges, weekly leaderboards and prizes')}</span></li>
-    <li>${ic('check')}<span>${L('ताज़ा करेंट अफेयर्स और मॉक टेस्ट', 'Fresh current affairs and mock tests')}</span></li>
-  </ul>
-  ${FB.err ? `<div class="note note-warn" role="alert">${ic('alert')}<div>${esc(FB.err)}</div></div>` : ''}
-  ${off ? `<div class="note note-warn">${ic('wifi-off')}<div>${L('पहली बार साइन इन करने के लिए इंटरनेट चाहिए।', 'You need the internet to sign in the first time.')}</div></div>` : ''}
-  <div class="onb-foot" style="flex-direction:column">
-    ${FB.state === 'error' ? `<button class="btn btn-cta btn-block" data-act="reload">${ic('rotate')} ${L('फिर कोशिश करें', 'Try again')}</button>`
-      : `<button class="btn btn-google btn-block" data-act="google-signin" ${waiting || FB.busy ? 'disabled' : ''}>${GOOGLE_G}<span>${waiting ? L('तैयार हो रहा है…', 'Getting ready…') : FB.busy ? L('साइन इन हो रहा है…', 'Signing in…') : L('Google से जारी रखें', 'Continue with Google')}</span></button>`}
-    ${CFG.allowGuest ? `<button class="btn btn-grey btn-block" data-act="guest">${L('बिना साइन इन जारी रखें', 'Continue without signing in')}</button>` : ''}
-    <p class="small muted" style="margin:0;text-align:center">${L('हम आपका नाम, ईमेल और फ़ोटो केवल आपकी प्रगति सहेजने के लिए लेते हैं। लीडरबोर्ड पर सिर्फ़ आपका दिखने वाला नाम और पॉइंट्स दिखते हैं।', 'We use your name, email and photo only to save your progress. The leaderboard shows just your display name and points.')}${safeUrl(CFG.privacyUrl) ? ` <a href="${esc(safeUrl(CFG.privacyUrl))}" target="_blank" rel="noopener noreferrer">${L('गोपनीयता नीति', 'Privacy policy')}</a>` : ''}</p>
-  </div>
+  return `<main class="login">
+  <section class="login-hero"><div class="gutter">
+    <div class="chips login-lang" role="group" aria-label="${L('भाषा', 'Language')}">${[['hi', 'हिंदी'], ['en', 'English']].map(([v, l]) => `<button class="chip" data-act="set-lang" data-v="${v}" aria-pressed="${LANG === v}" lang="${v}">${l}</button>`).join('')}</div>
+    <h1 class="login-logo">${capLogo()}<span>MY <span class="q">QUIZ</span></span></h1>
+    <p class="lead">${L('हिंदी और English में सामान्य ज्ञान — सीखें, अभ्यास करें, दोहराएँ और मुक़ाबला करें।', 'General knowledge in Hindi and English — learn, practise, revise and compete.')}</p>
+    <div class="login-tiles" aria-hidden="true"><span class="t-blue">${ic('brain')}</span><span class="t-green">${ic('calendar')}</span><span class="t-orange">${ic('newspaper')}</span><span class="t-purple">${ic('clipboard')}</span></div>
+  </div></section>
+  <section class="login-sheet gutter">
+    <ul class="facts">
+      <li>${ic('check')}<span>${L('आपकी प्रगति हर फ़ोन और कंप्यूटर पर सुरक्षित', 'Your progress is saved on every phone and computer')}</span></li>
+      <li>${ic('check')}<span>${L('रोज़ की चुनौती, साप्ताहिक लीडरबोर्ड और इनाम', 'Daily challenges, weekly leaderboards and prizes')}</span></li>
+      <li>${ic('check')}<span>${L('ताज़ा करेंट अफेयर्स और मॉक टेस्ट', 'Fresh current affairs and mock tests')}</span></li>
+    </ul>
+    ${FB.err ? `<div class="note note-warn" role="alert">${ic('alert')}<div>${esc(FB.err)}</div></div>` : ''}
+    ${off ? `<div class="note note-warn">${ic('wifi-off')}<div>${L('पहली बार साइन इन करने के लिए इंटरनेट चाहिए।', 'You need the internet to sign in the first time.')}</div></div>` : ''}
+    <div class="login-foot">
+      ${FB.state === 'error' ? `<button class="btn btn-cta btn-block" data-act="reload">${ic('rotate')} ${L('फिर कोशिश करें', 'Try again')}</button>`
+        : `<button class="btn btn-google btn-block" data-act="google-signin" ${waiting || FB.busy ? 'disabled' : ''}>${GOOGLE_G}<span>${waiting ? L('तैयार हो रहा है…', 'Getting ready…') : FB.busy ? L('साइन इन हो रहा है…', 'Signing in…') : L('Google से जारी रखें', 'Continue with Google')}</span></button>`}
+      ${CFG.allowGuest ? `<button class="btn btn-grey btn-block" data-act="guest">${L('बिना साइन इन जारी रखें', 'Continue without signing in')}</button>` : ''}
+      <p class="small muted" style="margin:0;text-align:center">${L('हम आपका नाम, ईमेल और फ़ोटो केवल आपकी प्रगति सहेजने के लिए लेते हैं। लीडरबोर्ड पर सिर्फ़ आपका दिखने वाला नाम और पॉइंट्स दिखते हैं।', 'We use your name, email and photo only to save your progress. The leaderboard shows just your display name and points.')}${safeUrl(CFG.privacyUrl) ? ` <a href="${esc(safeUrl(CFG.privacyUrl))}" target="_blank" rel="noopener noreferrer">${L('गोपनीयता नीति', 'Privacy policy')}</a>` : ''}</p>
+    </div>
+  </section>
 </main>`;
 }
 // Profile card for the signed-in account (self-hosted app only).

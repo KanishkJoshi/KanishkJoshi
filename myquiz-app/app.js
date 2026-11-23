@@ -210,7 +210,7 @@ const CFG = window.MYQUIZ_CONFIG || {};
 // Tester build (demo): content, progress and admin changes stay in this browser, and a bug reporter
 // plus a guided test plan are added. Enable with MYQUIZ_CONFIG.demo or ?demo=1 on a static host.
 const DEMO = !!CFG.demo || /[?&]demo(=1|=true)?(&|$)/.test(location.search);
-const BUILD = String(CFG.build || 'v3.0');
+const BUILD = String(CFG.build || 'v4.0');
 const P = {
   mode: window.claude && typeof window.claude.use === 'function' ? 'artifact' : 'standalone',
   demo: DEMO,
@@ -484,23 +484,28 @@ function vLogin() {
   if (!P.cloud) return redirect('home');
   if (FB.state === 'in' || (FB.guest && FB.state === 'out')) return redirect(U.s.onb ? 'home' : 'welcome');
   const waiting = FB.state === 'loading', off = navigator.onLine === false;
-  return `<main class="onb-page gutter login">
-  <div class="chips" style="justify-content:flex-end" role="group" aria-label="${L('भाषा', 'Language')}">${[['hi', 'हिंदी'], ['en', 'English']].map(([v, l]) => `<button class="chip" data-act="set-lang" data-v="${v}" aria-pressed="${LANG === v}" lang="${v}">${l}</button>`).join('')}</div>
-  <svg class="illus" viewBox="0 0 120 120" role="img" aria-label="${L('किताब और टोपी', 'A book and a graduation cap')}"><circle cx="60" cy="60" r="56" fill="var(--sky-soft)"/><path d="M28 78l32-12 32 12v8l-32-12-32 12z" fill="var(--navy)"/><path d="M60 30 24 46l36 16 36-16z" fill="var(--navy)"/><path d="M40 54v14c0 6 9 10 20 10s20-4 20-10V54" fill="none" stroke="var(--sky)" stroke-width="5"/><circle cx="92" cy="50" r="4" fill="var(--gold)"/></svg>
-  <div><h1>MY QUIZ</h1><p class="lead">${L('हिंदी और English में सामान्य ज्ञान — सीखें, अभ्यास करें, दोहराएँ और मुक़ाबला करें।', 'General knowledge in Hindi and English — learn, practise, revise and compete.')}</p></div>
-  <ul class="facts">
-    <li>${ic('check')}<span>${L('आपकी प्रगति हर फ़ोन और कंप्यूटर पर सुरक्षित', 'Your progress is saved on every phone and computer')}</span></li>
-    <li>${ic('check')}<span>${L('रोज़ की चुनौती, साप्ताहिक लीडरबोर्ड और इनाम', 'Daily challenges, weekly leaderboards and prizes')}</span></li>
-    <li>${ic('check')}<span>${L('ताज़ा करेंट अफेयर्स और मॉक टेस्ट', 'Fresh current affairs and mock tests')}</span></li>
-  </ul>
-  ${FB.err ? `<div class="note note-warn" role="alert">${ic('alert')}<div>${esc(FB.err)}</div></div>` : ''}
-  ${off ? `<div class="note note-warn">${ic('wifi-off')}<div>${L('पहली बार साइन इन करने के लिए इंटरनेट चाहिए।', 'You need the internet to sign in the first time.')}</div></div>` : ''}
-  <div class="onb-foot" style="flex-direction:column">
-    ${FB.state === 'error' ? `<button class="btn btn-cta btn-block" data-act="reload">${ic('rotate')} ${L('फिर कोशिश करें', 'Try again')}</button>`
-      : `<button class="btn btn-google btn-block" data-act="google-signin" ${waiting || FB.busy ? 'disabled' : ''}>${GOOGLE_G}<span>${waiting ? L('तैयार हो रहा है…', 'Getting ready…') : FB.busy ? L('साइन इन हो रहा है…', 'Signing in…') : L('Google से जारी रखें', 'Continue with Google')}</span></button>`}
-    ${CFG.allowGuest ? `<button class="btn btn-grey btn-block" data-act="guest">${L('बिना साइन इन जारी रखें', 'Continue without signing in')}</button>` : ''}
-    <p class="small muted" style="margin:0;text-align:center">${L('हम आपका नाम, ईमेल और फ़ोटो केवल आपकी प्रगति सहेजने के लिए लेते हैं। लीडरबोर्ड पर सिर्फ़ आपका दिखने वाला नाम और पॉइंट्स दिखते हैं।', 'We use your name, email and photo only to save your progress. The leaderboard shows just your display name and points.')}${safeUrl(CFG.privacyUrl) ? ` <a href="${esc(safeUrl(CFG.privacyUrl))}" target="_blank" rel="noopener noreferrer">${L('गोपनीयता नीति', 'Privacy policy')}</a>` : ''}</p>
-  </div>
+  return `<main class="login">
+  <section class="login-hero"><div class="gutter">
+    <div class="chips login-lang" role="group" aria-label="${L('भाषा', 'Language')}">${[['hi', 'हिंदी'], ['en', 'English']].map(([v, l]) => `<button class="chip" data-act="set-lang" data-v="${v}" aria-pressed="${LANG === v}" lang="${v}">${l}</button>`).join('')}</div>
+    <h1 class="login-logo">${capLogo()}<span>MY <span class="q">QUIZ</span></span></h1>
+    <p class="lead">${L('हिंदी और English में सामान्य ज्ञान — सीखें, अभ्यास करें, दोहराएँ और मुक़ाबला करें।', 'General knowledge in Hindi and English — learn, practise, revise and compete.')}</p>
+    <div class="login-tiles" aria-hidden="true"><span class="t-blue">${ic('brain')}</span><span class="t-green">${ic('calendar')}</span><span class="t-orange">${ic('newspaper')}</span><span class="t-purple">${ic('clipboard')}</span></div>
+  </div></section>
+  <section class="login-sheet gutter">
+    <ul class="facts">
+      <li>${ic('check')}<span>${L('आपकी प्रगति हर फ़ोन और कंप्यूटर पर सुरक्षित', 'Your progress is saved on every phone and computer')}</span></li>
+      <li>${ic('check')}<span>${L('रोज़ की चुनौती, साप्ताहिक लीडरबोर्ड और इनाम', 'Daily challenges, weekly leaderboards and prizes')}</span></li>
+      <li>${ic('check')}<span>${L('ताज़ा करेंट अफेयर्स और मॉक टेस्ट', 'Fresh current affairs and mock tests')}</span></li>
+    </ul>
+    ${FB.err ? `<div class="note note-warn" role="alert">${ic('alert')}<div>${esc(FB.err)}</div></div>` : ''}
+    ${off ? `<div class="note note-warn">${ic('wifi-off')}<div>${L('पहली बार साइन इन करने के लिए इंटरनेट चाहिए।', 'You need the internet to sign in the first time.')}</div></div>` : ''}
+    <div class="login-foot">
+      ${FB.state === 'error' ? `<button class="btn btn-cta btn-block" data-act="reload">${ic('rotate')} ${L('फिर कोशिश करें', 'Try again')}</button>`
+        : `<button class="btn btn-google btn-block" data-act="google-signin" ${waiting || FB.busy ? 'disabled' : ''}>${GOOGLE_G}<span>${waiting ? L('तैयार हो रहा है…', 'Getting ready…') : FB.busy ? L('साइन इन हो रहा है…', 'Signing in…') : L('Google से जारी रखें', 'Continue with Google')}</span></button>`}
+      ${CFG.allowGuest ? `<button class="btn btn-grey btn-block" data-act="guest">${L('बिना साइन इन जारी रखें', 'Continue without signing in')}</button>` : ''}
+      <p class="small muted" style="margin:0;text-align:center">${L('हम आपका नाम, ईमेल और फ़ोटो केवल आपकी प्रगति सहेजने के लिए लेते हैं। लीडरबोर्ड पर सिर्फ़ आपका दिखने वाला नाम और पॉइंट्स दिखते हैं।', 'We use your name, email and photo only to save your progress. The leaderboard shows just your display name and points.')}${safeUrl(CFG.privacyUrl) ? ` <a href="${esc(safeUrl(CFG.privacyUrl))}" target="_blank" rel="noopener noreferrer">${L('गोपनीयता नीति', 'Privacy policy')}</a>` : ''}</p>
+    </div>
+  </section>
 </main>`;
 }
 // Profile card for the signed-in account (self-hosted app only).
@@ -1145,6 +1150,7 @@ function answer(sel) {
   S.ans[q.id] = { sel, ok, ms, pts: earned };
   S.pts += earned;
   S.bonus.push(...(U.lastBonus || []));
+  S.justAt = Date.now();
   saveSession();
   render();
   const o = qO(q);
@@ -1176,6 +1182,8 @@ function finishSession() {
     LB.queue();
   }
   go('result');
+  const okN = S.qs.filter(q => S.ans[q.id] && S.ans[q.id].ok).length;
+  if (S.qs.length >= 3 && okN / S.qs.length >= 0.7) celebrate();
 }
 
 // ───────────────────────────── mock exams ─────────────────────────────
@@ -1296,6 +1304,18 @@ function topbar(title) {
     <a class="iconbtn" href="#profile" aria-label="${L('प्रोफ़ाइल और सेटिंग्स', 'Profile and settings')}"><span class="avatar">${name ? esc(initial(name)) : ic('user')}</span></a>
   </div></header>`;
 }
+// A short burst of confetti for a strong result (skipped when the learner prefers less motion).
+function celebrate() {
+  if (reducedMotion()) return;
+  const cols = ['#FFC727', '#22C55E', '#3B82F6', '#EC4899', '#8B5CF6', '#F97316'];
+  const box = document.createElement('div');
+  box.className = 'confetti'; box.setAttribute('aria-hidden', 'true');
+  box.innerHTML = Array.from({ length: 44 }, (_, i) => `<i style="--x:${(i * 37 + 7) % 100}%;--c:${cols[i % cols.length]};--r:${(i * 53) % 360}deg;--dx:${((i * 29) % 120) - 60}px;--d:${((i * 7) % 10) / 20}s;--t:${(2.2 + ((i * 13) % 10) / 10).toFixed(1)}s"></i>`).join('');
+  document.body.appendChild(box);
+  setTimeout(() => box.remove(), 4300);
+}
+// Gold trophy for the result screen.
+const TROPHY = '<svg class="trophy" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="trg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE38A"/><stop offset="1" stop-color="#F59E0B"/></linearGradient></defs><path d="M18 12H10a2 2 0 0 0-2 2c0 7 5 12 12 12M46 12h8a2 2 0 0 1 2 2c0 7-5 12-12 12" fill="none" stroke="#F5B400" stroke-width="4" stroke-linecap="round"/><path d="M17 7h30v15a15 15 0 0 1-30 0z" fill="url(#trg)"/><path d="m32 12 2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8z" fill="#fff" opacity=".92"/><rect x="28" y="36" width="8" height="9" fill="#E39400"/><rect x="19" y="45" width="26" height="9" rx="3" fill="url(#trg)"/></svg>';
 function ring(p, size, stroke, color = 'var(--ring)') {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r, off = c * (1 - clamp(p, 0, 1)), h = size / 2;
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true"><circle cx="${h}" cy="${h}" r="${r}" fill="none" style="stroke:var(--ring-track)" stroke-width="${stroke}"/><circle cx="${h}" cy="${h}" r="${r}" fill="none" style="stroke:${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" transform="rotate(-90 ${h} ${h})"/></svg>`;
@@ -1406,7 +1426,7 @@ function vPlay() {
       if (i === q.a) { cls = 'ok'; mark = `<span class="mark">${ic('check')}</span>`; }
       else if (i === a.sel) { cls = 'bad'; mark = `<span class="mark">${ic('x')}</span>`; }
     }
-    return `<button class="opt ${cls}" data-act="answer" data-i="${i}" ${a ? 'disabled' : ''}><span class="key">${LETTERS[i]}.</span><span class="txt">${esc(x)}</span>${mark}</button>`;
+    return `<button class="opt ${cls}" data-act="answer" data-i="${i}" ${a ? 'disabled' : ''}><span class="key">${LETTERS[i]}</span><span class="txt">${esc(x)}</span>${mark}</button>`;
   }).join('');
   const bm = U.isBm('q', q.id);
   const last = S.i === n - 1;
@@ -1418,7 +1438,7 @@ function vPlay() {
     <div class="qmeta"><span class="tag">${esc(subjName(q.s))} · ${esc(chName(chOf(q)))}</span>${diffBars(q.d)}<span class="qmeta-r">${S.pts ? ptsChip(S.pts) : ''}${timer}</span></div>
   </div>
   <h2 class="qtext">${esc(qT(q))}</h2>
-  <div class="opts" role="group" aria-label="${L('विकल्प', 'Options')}">${opts}</div>
+  <div class="opts${a && S.justAt && Date.now() - S.justAt < 700 ? ' fresh' : ''}" role="group" aria-label="${L('विकल्प', 'Options')}">${opts}</div>
   ${a ? explainBox(q, a) : ''}
   <div class="qtools">
     <button class="btn btn-sm btn-outline" data-act="bm-q" data-id="${esc(q.id)}" aria-pressed="${bm}">${ic('bookmark', bm ? 'fill' : '')} ${bm ? L('सहेजा गया', 'Saved') : L('बुकमार्क', 'Save')}</button>
@@ -1449,7 +1469,7 @@ function vResult() {
   return `${appbar(L('परिणाम', 'Result'), { back: S.back })}
 <main class="page gutter">
   <section class="card result-hero">
-    <div class="big-ring">${ring(p, 150, 12, p >= 0.5 ? 'var(--ring)' : 'var(--bad-solid)')}<b class="tnum">${c}/${n}<small>${L('सही उत्तर', 'correct')}</small></b></div>
+    ${p >= 0.7 ? TROPHY : ''}<div class="big-ring">${ring(p, 150, 12, p >= 0.5 ? 'var(--ring)' : 'var(--bad-solid)')}<b class="tnum">${c}/${n}<small>${L('सही उत्तर', 'correct')}</small></b></div>
     <h2 style="font-family:var(--font-display);font-size:1.35rem;margin:6px 0 0">${esc(sTitle())}</h2>
     <p class="muted" style="margin:0">${msg}</p>
     <span class="pill pill-gold">${ic('coins')} +${fmtNum(S.pts)} ${L('पॉइंट्स', 'points')}</span>
@@ -1539,7 +1559,7 @@ function vExam() {
   if (!q) { setTimeout(() => examMove(E.i + 1 < E.qs.length ? E.i + 1 : 0), 0); return ''; }
   const st = E.st[id] || {}, n = E.qs.length;
   const remaining = Math.max(0, E.endsAt - Date.now());
-  const opts = qO(q).map((o, i) => `<button class="opt ${st.sel === i ? 'sel' : ''}" data-act="exam-sel" data-i="${i}" aria-pressed="${st.sel === i}"><span class="key">${LETTERS[i]}.</span><span class="txt">${esc(o)}</span></button>`).join('');
+  const opts = qO(q).map((o, i) => `<button class="opt ${st.sel === i ? 'sel' : ''}" data-act="exam-sel" data-i="${i}" aria-pressed="${st.sel === i}"><span class="key">${LETTERS[i]}</span><span class="txt">${esc(o)}</span></button>`).join('');
   return `<header class="exambar"><div class="exambar-in gutter">
     <button class="iconbtn" data-act="exam-exit" aria-label="${L('परीक्षा से बाहर जाएँ', 'Leave the test')}">${ic('x')}</button>
     <span class="t">${esc(examTitle(E))}</span>
@@ -1849,7 +1869,10 @@ function recommendations(skip) {
   if ((m.bySubj.ca || []).length) add('newspaper', L('करेंट अफेयर्स क्विज', 'Current affairs quiz'), L('नवीनतम ख़बरों से 10 प्रश्न', '10 questions from the latest news'), 'start-ca');
   return out;
 }
-const recRow = r => `<button class="row" data-act="${r.act}"${dataAttrs(r.data)}><span class="row-ic" style="--c:var(--brand)">${ic(r.icon)}</span><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(r.title)}</span><span class="row-sub">${esc(r.sub)}</span></span>${ic('chev-right', 'chev')}</button>`;
+const REC_C = { rotate: '#EA580C', target: '#DC2626', layers: '#2453D6', swords: '#7C3AED', newspaper: '#C2410C' };
+const recRow = r => `<button class="row" data-act="${r.act}"${dataAttrs(r.data)}><span class="row-ic" style="--c:${REC_C[r.icon] || '#2453D6'}">${ic(r.icon)}</span><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(r.title)}</span><span class="row-sub">${esc(r.sub)}</span></span>${ic('chev-right', 'chev')}</button>`;
+// One of the four big colour tiles on Home (the client's design).
+const homeTile = (href, cls, icon, title, sub, badge = '', latin = false) => `<a class="tile ${cls}" href="${href}"><span class="ti">${ic(icon)}</span><b${latin ? ' class="latin"' : ''}>${title}</b><span class="ts">${sub}</span>${badge ? `<em class="tb">${badge}</em>` : ''}</a>`;
 
 function vHome() {
   const m = M(), t = todayISO(), s = U.s;
@@ -1859,28 +1882,32 @@ function vHome() {
   const recent = s.recent.filter(r => (m.byCh[r.ch] || []).length).slice(0, 5);
   const weak = U.weakTopics(3);
   const caToday = m.news.filter(n => n.date === t).length, dayToday = (m.daysByMd[t.slice(5)] || [])[0];
+  const topics = uniq(m.news.slice(0, 24).map(n => n.cat)).filter(Boolean).slice(0, 6);
   return `${topbar(`${capLogo()}<span>MY <span class="q">QUIZ</span></span>`)}
-<section class="welcome"><div class="gutter"><h2>${L('नमस्कार', 'Hello')}${name ? `, ${esc(name)}` : ''}!</h2><p>${s.exam ? `${esc(examLabel(s.exam))} ${L('की तैयारी', 'preparation')} · ` : ''}${L(`रोज़ ${goal} प्रश्न का लक्ष्य`, `goal: ${goal} questions a day`)}</p></div></section>
+<section class="welcome"><div class="gutter"><h2>${L('नमस्कार', 'Hello')}${name ? `, ${esc(name)}` : ''}! 👋</h2><p>${s.exam ? `${esc(examLabel(s.exam))} ${L('की तैयारी', 'preparation')} · ` : ''}${L(`रोज़ ${goal} प्रश्न का लक्ष्य`, `goal: ${goal} questions a day`)}</p>
+  <div class="hchips"><span class="hchip" title="${L('दिन की स्ट्रीक', 'Day streak')}">${ic('flame', 'i-f')}<b class="tnum">${st}</b> ${L('दिन स्ट्रीक', 'day streak')}</span><span class="hchip" title="${L('आज के पॉइंट्स', 'Points today')}">${ic('coins', 'i-c')}<b class="tnum">${fmtNum(U.ptsToday())}</b> ${L('पॉइंट्स', 'points')}</span><a class="hchip" href="#leaders" title="${L('इस सप्ताह की रैंक', 'This week\'s rank')}">${ic('trophy', 'i-t')}<b class="tnum">${rank ? '#' + rank : '–'}</b> ${L('रैंक', 'rank')}</a></div></div></section>
 <main class="page gutter dash">
   ${C.baseState === 'error' ? dataErrorNote() : ''}
   <section class="card next" aria-label="${L('आपका अगला क़दम', 'Your next step')}">
-    <span class="k">${L('आपका अगला क़दम', 'Your next step')}</span>
+    <span class="k">${ic('calendar')} ${L('आज की तैयारी', 'Today\'s plan')}</span>
     <h3>${esc(na.title)}</h3><p>${esc(na.sub)}</p>
-    <div class="ringbox" role="img" aria-label="${L(`आज ${goal} में से ${cnt} प्रश्न`, `${cnt} of ${goal} questions today`)}">${ring(cnt / goal, 76, 7, cnt >= goal ? 'var(--ok-solid)' : 'var(--ring)')}<b class="tnum">${Math.min(cnt, 999)}<small>/ ${goal}</small></b></div>
+    <div class="ringbox" role="img" aria-label="${L(`आज ${goal} में से ${cnt} प्रश्न`, `${cnt} of ${goal} questions today`)}">${ring(cnt / goal, 78, 8, cnt >= goal ? 'var(--ok-solid)' : '#F59E0B')}<b class="tnum">${Math.min(cnt, 999)}<small>/ ${goal}</small></b></div>
     <button class="btn btn-cta btn-block" data-act="${na.act}"${dataAttrs(na.data)} ${C.baseState === 'loading' ? 'disabled' : ''}>${esc(na.cta)} ${ic('arrow-right')}</button>
-    <div class="meta-row"><span>${ic('flame')} <b>${st}</b> ${L('दिन की स्ट्रीक', 'day streak')}</span><span>${ic('coins')} <b>${fmtNum(U.ptsToday())}</b> ${L('पॉइंट्स आज', 'points today')}</span></div>
   </section>
+  <nav class="tiles" aria-label="${L('मुख्य भाग', 'Main sections')}">
+    ${homeTile('#learn', 't-blue', 'brain', L('क्विज', 'Quiz'), L('विषयवार सामान्य ज्ञान', 'GK by subject'))}
+    ${homeTile('#today', 't-green', 'calendar', L('आज का दिन', 'This Day'), dayToday ? esc(dT(dayToday)) : L('महत्वपूर्ण दिवस', 'Important days'))}
+    ${homeTile('#ca', 't-orange', 'newspaper', 'Current Affairs', L('दैनिक समसामयिकी', 'Daily news'), caToday ? L(`${caToday} नई`, `${caToday} new`) : '', true)}
+    ${homeTile('#mock', 't-purple', 'clipboard', L('अभ्यास परीक्षा', 'Mock Tests'), L('मॉक टेस्ट', 'Timed practice exams'))}
+  </nav>
+  ${topics.length ? `<section class="sec"><h2 class="sec-title">${ic('star', 'star fill')} ${L('आज के महत्वपूर्ण विषय', 'Today\'s key topics')}</h2><div class="tchips">${topics.map(c => { const x = catOf(c); return `<button class="tchip" style="--c:${x.c1}" data-act="ca-cat" data-cat="${esc(c)}">${ic(x.icon)} ${esc(catLabel(c))}</button>`; }).join('')}</div></section>` : ''}
   <section class="sec" aria-label="${L('यह सप्ताह', 'This week')}">
     <div class="sec-head"><h2 class="sec-title">${ic('chart')} ${L('यह सप्ताह', 'This week')}</h2><a class="link" href="#progress">${L('पूरी प्रगति', 'Full progress')} ${ic('chev-right')}</a></div>
     <div class="card">${weekBars(true)}<div class="meta-row" style="margin-top:8px"><span><b>${ws.n}</b> ${L('प्रश्न', 'questions')}</span><span><b>${ws.acc}%</b> ${L('सटीकता', 'accuracy')}</span><span><b>${fmtNum(ws.pts)}</b> ${L('पॉइंट्स', 'points')}</span>${rank ? `<span>${L('रैंक', 'Rank')} <b>#${rank}</b></span>` : ''}</div></div>
   </section>
-  ${recent.length ? `<section class="sec"><h2 class="sec-title">${ic('book-open')} ${L('पढ़ाई जारी रखें', 'Continue learning')}</h2><div class="hscroll">${recent.map(r => { const x = U.chStats(r.ch); return `<a class="mini-card" href="#chapter/${esc(r.ch)}"><span class="s">${esc(subjName((CHM[r.ch] || {}).s || ''))}</span><span class="t">${esc(chName(r.ch))}</span><span class="s">${x.cov}% ${L('पूरा', 'done')} · ${mLabel(x.level)}</span><span class="minibar ${x.level >= 3 ? 'ok' : ''}"><i style="width:${x.cov}%"></i></span></a>`; }).join('')}</div></section>` : ''}
+  ${recent.length ? `<section class="sec"><h2 class="sec-title">${ic('book-open')} ${L('पढ़ाई जारी रखें', 'Continue learning')}</h2><div class="hscroll">${recent.map(r => { const x = U.chStats(r.ch), sj = SUBJ[(CHM[r.ch] || {}).s] || {}; return `<a class="mini-card" href="#chapter/${esc(r.ch)}" style="--c:${sj.c || '#3B82F6'}"><span class="s">${esc(subjName((CHM[r.ch] || {}).s || ''))}</span><span class="t">${esc(chName(r.ch))}</span><span class="s">${x.cov}% ${L('पूरा', 'done')} · ${mLabel(x.level)}</span><span class="minibar c ${x.level >= 3 ? 'ok' : ''}"><i style="width:${x.cov}%"></i></span></a>`; }).join('')}</div></section>` : ''}
   <section class="sec"><h2 class="sec-title">${ic('sparkles')} ${L('आपके लिए सुझाव', 'Recommended for you')}</h2><div class="list">${recommendations(na.act).map(recRow).join('') || `<div class="empty">${L('अभी कोई सुझाव नहीं — कुछ प्रश्न हल करें।', 'No suggestions yet — answer a few questions.')}</div>`}</div></section>
   ${weak.length ? `<section class="sec"><h2 class="sec-title">${ic('target')} ${L('कमज़ोर विषय', 'Weak topics')}</h2><div class="list">${weak.map(w => `<button class="row" data-act="practice-topic" data-ch="${esc(w.ch)}" data-t="${esc(w.t)}"><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(L(w.t, w.tEn))}</span><span class="row-sub">${esc(chName(w.ch))}</span><span class="minibar"><i style="width:${w.acc}%;background:var(--bad-solid)"></i></span></span><span class="pct">${w.acc}%</span>${ic('chev-right', 'chev')}</button>`).join('')}</div></section>` : ''}
-  <section class="sec"><h2 class="sec-title">${ic('calendar')} ${L('आज की पढ़ाई', 'Today\'s reading')}</h2>
-    <div class="split"><a class="tile2" href="#ca">${ic('newspaper')}<b>${L('करेंट अफेयर्स', 'Current affairs')}</b><span>${caToday ? L(`आज की ${caToday} ख़बरें`, `${caToday} stories today`) : m.news[0] ? `${L('नवीनतम', 'Latest')}: ${fmtDate(m.news[0].date, false)}` : ''}</span></a>
-    <a class="tile2" href="#today">${ic('calendar')}<b>${L('आज का दिन', 'Today in History')}</b><span>${dayToday ? esc(dT(dayToday)) : L('इतिहास में आज और 5 प्रश्न', 'On this day and 5 questions')}</span></a></div>
-  </section>
   ${P.isAdmin ? `<a class="act" href="#admin"><span class="ai">${ic('settings')}</span><span>${L('एडमिन पैनल', 'Admin panel')}<span class="row-sub">${LOCAL() ? L('डेमो: बदलाव इसी ब्राउज़र में', 'Demo: changes stay in this browser') : L('सामग्री, AI प्रश्न, समीक्षा, प्रकाशन और पुरस्कार', 'Content, AI questions, review, publishing and prizes')}</span></span>${ic('chev-right', 'chev')}</a>` : ''}
 </main>
 ${bottomNav('home')}`;
@@ -1893,7 +1920,7 @@ function vLearn() {
     const list = exPool(m.bySubj[sj.k] || [], ex);
     if (!list.length) return '';
     const x = U.stats(list), chs = chaptersOf(sj.k).filter(c => exPool(m.byCh[c.id] || [], ex).length).length;
-    return `<a class="row" href="#subject/${sj.k}" style="--c:${sj.c}"><span class="row-ic">${ic(sj.icon)}</span><span class="row-main"><span class="row-title">${subjName(sj.k)}</span><span class="row-sub">${L(`${chs} अध्याय · ${list.length} प्रश्न`, `${chs} chapters · ${list.length} questions`)} · ${mLabel(x.level)}</span><span class="minibar ${x.level >= 3 ? 'ok' : ''}"><i style="width:${x.cov}%"></i></span></span><span class="pct">${x.cov}%</span>${ic('chev-right', 'chev')}</a>`;
+    return `<a class="row" href="#subject/${sj.k}" style="--c:${sj.c}"><span class="row-ic">${ic(sj.icon)}</span><span class="row-main"><span class="row-title">${subjName(sj.k)}</span><span class="row-sub">${L(`${chs} अध्याय`, `${chs} chapters`)} · ${mLabel(x.level)}</span><span class="minibar ${x.level >= 3 ? 'ok' : ''}"><i style="width:${x.cov}%"></i></span></span><span class="count tnum">${L(`${list.length} प्रश्न`, `${list.length} Qs`)}</span>${ic('chev-right', 'chev')}</a>`;
   }).join('');
   const due = U.due().length, wrong = Object.values(U.s.ans).filter(a => !a.l).length;
   return `${topbar(L('सीखें', 'Learn'))}
@@ -1901,7 +1928,8 @@ function vLearn() {
   <button class="search" data-act="search-open" style="width:100%;cursor:text;text-align:left">${ic('search')}<span class="muted">${L('प्रश्न, विषय या शब्द खोजें', 'Search questions, topics or words')}</span></button>
   <div class="sec"><span class="small muted">${ic('graduation')} ${L('परीक्षा के अनुसार', 'By exam')}</span><div class="chips" role="group" aria-label="${L('परीक्षा', 'Exam')}"><button class="chip" data-act="learn-ex" data-v="all" aria-pressed="${ex === 'all'}">${L('सभी', 'All')}</button>${EXAMS.map(e => `<button class="chip" data-act="learn-ex" data-v="${e.id}" aria-pressed="${ex === e.id}">${esc(L(e.hi, e.en))}</button>`).join('')}</div></div>
   ${C.baseState === 'error' ? dataErrorNote() : ''}
-  <section class="sec"><h2 class="sec-title">${ic('layers')} ${L('विषय', 'Subjects')}</h2><div class="list">${C.baseState === 'loading' ? skeletonRows(5) : subj || emptyState('layers', L('इस परीक्षा के लिए अभी प्रश्न नहीं', 'No questions for this exam yet'), '')}</div></section>
+  <section class="sec"><h2 class="sec-title">${ic('layers')} ${L('विषय चुनें', 'Choose a subject')}</h2><div class="list subj-list">${C.baseState === 'loading' ? skeletonRows(5) : subj || emptyState('layers', L('इस परीक्षा के लिए अभी प्रश्न नहीं', 'No questions for this exam yet'), '')}</div>
+    <div class="tip">${ic('bulb')}<p>${L('अपनी पसंद का विषय चुनें और ज्ञान की परीक्षा दें।', 'Pick a subject you like and put your knowledge to the test.')}</p></div></section>
   <section class="sec"><h2 class="sec-title">${ic('calendar')} ${L('रोज़ की पढ़ाई', 'Daily learning')}</h2>
     <div class="split"><a class="tile2" href="#ca">${ic('newspaper')}<b>${L('करेंट अफेयर्स', 'Current affairs')}</b><span>${L('दैनिक, साप्ताहिक, मासिक', 'Daily, weekly, monthly')}</span></a><a class="tile2" href="#today">${ic('calendar')}<b>${L('आज का दिन', 'Today in History')}</b><span>${L('3–5 मिनट का दैनिक सत्र', 'A 3–5 minute daily session')}</span></a></div></section>
   <section class="sec"><div class="sec-head"><h2 class="sec-title">${ic('rotate')} ${L('दोहराव', 'Revision')}</h2><a class="link" href="#revise">${L('सब देखें', 'See all')} ${ic('chev-right')}</a></div>
@@ -1921,7 +1949,7 @@ function vSubject() {
   }).join('');
   return `${appbar(esc(subjName(k)), { back: 'learn', right: `<button class="iconbtn" data-act="search-open" aria-label="${L('प्रश्न खोजें', 'Search questions')}">${ic('search')}</button>` })}
 <main class="page gutter">
-  <section class="card sum"><div class="sum-top"><div class="ringbox">${ring(x.cov / 100, 64, 6)}<b class="tnum" style="font-size:.9rem">${x.cov}%</b></div><span class="row-main"><b>${esc(subjName(k))}</b><span class="row-sub">${L(`${all.length} प्रश्न · सटीकता ${x.acc}%`, `${all.length} questions · ${x.acc}% accuracy`)} · ${mLabel(x.level)}</span></span></div>
+  <section class="card sum"><div class="sum-top"><div class="ringbox">${ring(x.cov / 100, 64, 6, sj.c)}<b class="tnum" style="font-size:.9rem">${x.cov}%</b></div><span class="row-main"><b>${esc(subjName(k))}</b><span class="row-sub">${L(`${all.length} प्रश्न · सटीकता ${x.acc}%`, `${all.length} questions · ${x.acc}% accuracy`)} · ${mLabel(x.level)}</span></span></div>
     <div class="grid2"><button class="btn btn-cta" data-act="start-subject" data-s="${k}" ${pool.length ? '' : 'disabled'}>${ic('play')} ${L('अभ्यास', 'Practise')}</button><button class="btn btn-outline" data-act="exam-pool" data-s="${k}" ${pool.length >= 3 ? '' : 'disabled'}>${ic('clock')} ${L('परीक्षा मोड', 'Exam mode')}</button></div>
     <p class="small muted" style="margin:0">${L('अभ्यास: हर उत्तर पर तुरंत व्याख्या। परीक्षा मोड: समय-सीमा, उत्तर अंत में।', 'Practice: instant explanation after every answer. Exam mode: timed, answers only at the end.')}</p></section>
   ${diffChips()}
@@ -4086,6 +4114,7 @@ function render(routeChanged = false) {
   app.innerHTML = (navigator.onLine === false ? `<div class="offline" role="status">${ic('wifi-off')} ${L('आप ऑफ़लाइन हैं — अभ्यास जारी रखें, प्रगति बाद में सिंक होगी।', 'You are offline — keep practising; progress syncs later.')}</div>` : '') + (authGate() || ROUTES[route] || vHome)();
   app.classList.toggle('no-nav', NO_NAV.has(route) || !!authGate());
   app.classList.toggle('exam-pad', route === 'exam');
+  app.classList.toggle('enter', !!routeChanged);
   if (routeChanged) window.scrollTo(0, 0);
   if (DEMO) renderDemoStrip();
   afterRender();

@@ -44,7 +44,10 @@ function recommendations(skip) {
   if ((m.bySubj.ca || []).length) add('newspaper', L('करेंट अफेयर्स क्विज', 'Current affairs quiz'), L('नवीनतम ख़बरों से 10 प्रश्न', '10 questions from the latest news'), 'start-ca');
   return out;
 }
-const recRow = r => `<button class="row" data-act="${r.act}"${dataAttrs(r.data)}><span class="row-ic" style="--c:var(--brand)">${ic(r.icon)}</span><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(r.title)}</span><span class="row-sub">${esc(r.sub)}</span></span>${ic('chev-right', 'chev')}</button>`;
+const REC_C = { rotate: '#EA580C', target: '#DC2626', layers: '#2453D6', swords: '#7C3AED', newspaper: '#C2410C' };
+const recRow = r => `<button class="row" data-act="${r.act}"${dataAttrs(r.data)}><span class="row-ic" style="--c:${REC_C[r.icon] || '#2453D6'}">${ic(r.icon)}</span><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(r.title)}</span><span class="row-sub">${esc(r.sub)}</span></span>${ic('chev-right', 'chev')}</button>`;
+// One of the four big colour tiles on Home (the client's design).
+const homeTile = (href, cls, icon, title, sub, badge = '', latin = false) => `<a class="tile ${cls}" href="${href}"><span class="ti">${ic(icon)}</span><b${latin ? ' class="latin"' : ''}>${title}</b><span class="ts">${sub}</span>${badge ? `<em class="tb">${badge}</em>` : ''}</a>`;
 
 function vHome() {
   const m = M(), t = todayISO(), s = U.s;
@@ -54,28 +57,32 @@ function vHome() {
   const recent = s.recent.filter(r => (m.byCh[r.ch] || []).length).slice(0, 5);
   const weak = U.weakTopics(3);
   const caToday = m.news.filter(n => n.date === t).length, dayToday = (m.daysByMd[t.slice(5)] || [])[0];
+  const topics = uniq(m.news.slice(0, 24).map(n => n.cat)).filter(Boolean).slice(0, 6);
   return `${topbar(`${capLogo()}<span>MY <span class="q">QUIZ</span></span>`)}
-<section class="welcome"><div class="gutter"><h2>${L('नमस्कार', 'Hello')}${name ? `, ${esc(name)}` : ''}!</h2><p>${s.exam ? `${esc(examLabel(s.exam))} ${L('की तैयारी', 'preparation')} · ` : ''}${L(`रोज़ ${goal} प्रश्न का लक्ष्य`, `goal: ${goal} questions a day`)}</p></div></section>
+<section class="welcome"><div class="gutter"><h2>${L('नमस्कार', 'Hello')}${name ? `, ${esc(name)}` : ''}! 👋</h2><p>${s.exam ? `${esc(examLabel(s.exam))} ${L('की तैयारी', 'preparation')} · ` : ''}${L(`रोज़ ${goal} प्रश्न का लक्ष्य`, `goal: ${goal} questions a day`)}</p>
+  <div class="hchips"><span class="hchip" title="${L('दिन की स्ट्रीक', 'Day streak')}">${ic('flame', 'i-f')}<b class="tnum">${st}</b> ${L('दिन स्ट्रीक', 'day streak')}</span><span class="hchip" title="${L('आज के पॉइंट्स', 'Points today')}">${ic('coins', 'i-c')}<b class="tnum">${fmtNum(U.ptsToday())}</b> ${L('पॉइंट्स', 'points')}</span><a class="hchip" href="#leaders" title="${L('इस सप्ताह की रैंक', 'This week\'s rank')}">${ic('trophy', 'i-t')}<b class="tnum">${rank ? '#' + rank : '–'}</b> ${L('रैंक', 'rank')}</a></div></div></section>
 <main class="page gutter dash">
   ${C.baseState === 'error' ? dataErrorNote() : ''}
   <section class="card next" aria-label="${L('आपका अगला क़दम', 'Your next step')}">
-    <span class="k">${L('आपका अगला क़दम', 'Your next step')}</span>
+    <span class="k">${ic('calendar')} ${L('आज की तैयारी', 'Today\'s plan')}</span>
     <h3>${esc(na.title)}</h3><p>${esc(na.sub)}</p>
-    <div class="ringbox" role="img" aria-label="${L(`आज ${goal} में से ${cnt} प्रश्न`, `${cnt} of ${goal} questions today`)}">${ring(cnt / goal, 76, 7, cnt >= goal ? 'var(--ok-solid)' : 'var(--ring)')}<b class="tnum">${Math.min(cnt, 999)}<small>/ ${goal}</small></b></div>
+    <div class="ringbox" role="img" aria-label="${L(`आज ${goal} में से ${cnt} प्रश्न`, `${cnt} of ${goal} questions today`)}">${ring(cnt / goal, 78, 8, cnt >= goal ? 'var(--ok-solid)' : '#F59E0B')}<b class="tnum">${Math.min(cnt, 999)}<small>/ ${goal}</small></b></div>
     <button class="btn btn-cta btn-block" data-act="${na.act}"${dataAttrs(na.data)} ${C.baseState === 'loading' ? 'disabled' : ''}>${esc(na.cta)} ${ic('arrow-right')}</button>
-    <div class="meta-row"><span>${ic('flame')} <b>${st}</b> ${L('दिन की स्ट्रीक', 'day streak')}</span><span>${ic('coins')} <b>${fmtNum(U.ptsToday())}</b> ${L('पॉइंट्स आज', 'points today')}</span></div>
   </section>
+  <nav class="tiles" aria-label="${L('मुख्य भाग', 'Main sections')}">
+    ${homeTile('#learn', 't-blue', 'brain', L('क्विज', 'Quiz'), L('विषयवार सामान्य ज्ञान', 'GK by subject'))}
+    ${homeTile('#today', 't-green', 'calendar', L('आज का दिन', 'This Day'), dayToday ? esc(dT(dayToday)) : L('महत्वपूर्ण दिवस', 'Important days'))}
+    ${homeTile('#ca', 't-orange', 'newspaper', 'Current Affairs', L('दैनिक समसामयिकी', 'Daily news'), caToday ? L(`${caToday} नई`, `${caToday} new`) : '', true)}
+    ${homeTile('#mock', 't-purple', 'clipboard', L('अभ्यास परीक्षा', 'Mock Tests'), L('मॉक टेस्ट', 'Timed practice exams'))}
+  </nav>
+  ${topics.length ? `<section class="sec"><h2 class="sec-title">${ic('star', 'star fill')} ${L('आज के महत्वपूर्ण विषय', 'Today\'s key topics')}</h2><div class="tchips">${topics.map(c => { const x = catOf(c); return `<button class="tchip" style="--c:${x.c1}" data-act="ca-cat" data-cat="${esc(c)}">${ic(x.icon)} ${esc(catLabel(c))}</button>`; }).join('')}</div></section>` : ''}
   <section class="sec" aria-label="${L('यह सप्ताह', 'This week')}">
     <div class="sec-head"><h2 class="sec-title">${ic('chart')} ${L('यह सप्ताह', 'This week')}</h2><a class="link" href="#progress">${L('पूरी प्रगति', 'Full progress')} ${ic('chev-right')}</a></div>
     <div class="card">${weekBars(true)}<div class="meta-row" style="margin-top:8px"><span><b>${ws.n}</b> ${L('प्रश्न', 'questions')}</span><span><b>${ws.acc}%</b> ${L('सटीकता', 'accuracy')}</span><span><b>${fmtNum(ws.pts)}</b> ${L('पॉइंट्स', 'points')}</span>${rank ? `<span>${L('रैंक', 'Rank')} <b>#${rank}</b></span>` : ''}</div></div>
   </section>
-  ${recent.length ? `<section class="sec"><h2 class="sec-title">${ic('book-open')} ${L('पढ़ाई जारी रखें', 'Continue learning')}</h2><div class="hscroll">${recent.map(r => { const x = U.chStats(r.ch); return `<a class="mini-card" href="#chapter/${esc(r.ch)}"><span class="s">${esc(subjName((CHM[r.ch] || {}).s || ''))}</span><span class="t">${esc(chName(r.ch))}</span><span class="s">${x.cov}% ${L('पूरा', 'done')} · ${mLabel(x.level)}</span><span class="minibar ${x.level >= 3 ? 'ok' : ''}"><i style="width:${x.cov}%"></i></span></a>`; }).join('')}</div></section>` : ''}
+  ${recent.length ? `<section class="sec"><h2 class="sec-title">${ic('book-open')} ${L('पढ़ाई जारी रखें', 'Continue learning')}</h2><div class="hscroll">${recent.map(r => { const x = U.chStats(r.ch), sj = SUBJ[(CHM[r.ch] || {}).s] || {}; return `<a class="mini-card" href="#chapter/${esc(r.ch)}" style="--c:${sj.c || '#3B82F6'}"><span class="s">${esc(subjName((CHM[r.ch] || {}).s || ''))}</span><span class="t">${esc(chName(r.ch))}</span><span class="s">${x.cov}% ${L('पूरा', 'done')} · ${mLabel(x.level)}</span><span class="minibar c ${x.level >= 3 ? 'ok' : ''}"><i style="width:${x.cov}%"></i></span></a>`; }).join('')}</div></section>` : ''}
   <section class="sec"><h2 class="sec-title">${ic('sparkles')} ${L('आपके लिए सुझाव', 'Recommended for you')}</h2><div class="list">${recommendations(na.act).map(recRow).join('') || `<div class="empty">${L('अभी कोई सुझाव नहीं — कुछ प्रश्न हल करें।', 'No suggestions yet — answer a few questions.')}</div>`}</div></section>
   ${weak.length ? `<section class="sec"><h2 class="sec-title">${ic('target')} ${L('कमज़ोर विषय', 'Weak topics')}</h2><div class="list">${weak.map(w => `<button class="row" data-act="practice-topic" data-ch="${esc(w.ch)}" data-t="${esc(w.t)}"><span class="row-main"><span class="row-title" style="font-size:1rem">${esc(L(w.t, w.tEn))}</span><span class="row-sub">${esc(chName(w.ch))}</span><span class="minibar"><i style="width:${w.acc}%;background:var(--bad-solid)"></i></span></span><span class="pct">${w.acc}%</span>${ic('chev-right', 'chev')}</button>`).join('')}</div></section>` : ''}
-  <section class="sec"><h2 class="sec-title">${ic('calendar')} ${L('आज की पढ़ाई', 'Today\'s reading')}</h2>
-    <div class="split"><a class="tile2" href="#ca">${ic('newspaper')}<b>${L('करेंट अफेयर्स', 'Current affairs')}</b><span>${caToday ? L(`आज की ${caToday} ख़बरें`, `${caToday} stories today`) : m.news[0] ? `${L('नवीनतम', 'Latest')}: ${fmtDate(m.news[0].date, false)}` : ''}</span></a>
-    <a class="tile2" href="#today">${ic('calendar')}<b>${L('आज का दिन', 'Today in History')}</b><span>${dayToday ? esc(dT(dayToday)) : L('इतिहास में आज और 5 प्रश्न', 'On this day and 5 questions')}</span></a></div>
-  </section>
   ${P.isAdmin ? `<a class="act" href="#admin"><span class="ai">${ic('settings')}</span><span>${L('एडमिन पैनल', 'Admin panel')}<span class="row-sub">${LOCAL() ? L('डेमो: बदलाव इसी ब्राउज़र में', 'Demo: changes stay in this browser') : L('सामग्री, AI प्रश्न, समीक्षा, प्रकाशन और पुरस्कार', 'Content, AI questions, review, publishing and prizes')}</span></span>${ic('chev-right', 'chev')}</a>` : ''}
 </main>
 ${bottomNav('home')}`;
@@ -88,7 +95,7 @@ function vLearn() {
     const list = exPool(m.bySubj[sj.k] || [], ex);
     if (!list.length) return '';
     const x = U.stats(list), chs = chaptersOf(sj.k).filter(c => exPool(m.byCh[c.id] || [], ex).length).length;
-    return `<a class="row" href="#subject/${sj.k}" style="--c:${sj.c}"><span class="row-ic">${ic(sj.icon)}</span><span class="row-main"><span class="row-title">${subjName(sj.k)}</span><span class="row-sub">${L(`${chs} अध्याय · ${list.length} प्रश्न`, `${chs} chapters · ${list.length} questions`)} · ${mLabel(x.level)}</span><span class="minibar ${x.level >= 3 ? 'ok' : ''}"><i style="width:${x.cov}%"></i></span></span><span class="pct">${x.cov}%</span>${ic('chev-right', 'chev')}</a>`;
+    return `<a class="row" href="#subject/${sj.k}" style="--c:${sj.c}"><span class="row-ic">${ic(sj.icon)}</span><span class="row-main"><span class="row-title">${subjName(sj.k)}</span><span class="row-sub">${L(`${chs} अध्याय`, `${chs} chapters`)} · ${mLabel(x.level)}</span><span class="minibar ${x.level >= 3 ? 'ok' : ''}"><i style="width:${x.cov}%"></i></span></span><span class="count tnum">${L(`${list.length} प्रश्न`, `${list.length} Qs`)}</span>${ic('chev-right', 'chev')}</a>`;
   }).join('');
   const due = U.due().length, wrong = Object.values(U.s.ans).filter(a => !a.l).length;
   return `${topbar(L('सीखें', 'Learn'))}
@@ -96,7 +103,8 @@ function vLearn() {
   <button class="search" data-act="search-open" style="width:100%;cursor:text;text-align:left">${ic('search')}<span class="muted">${L('प्रश्न, विषय या शब्द खोजें', 'Search questions, topics or words')}</span></button>
   <div class="sec"><span class="small muted">${ic('graduation')} ${L('परीक्षा के अनुसार', 'By exam')}</span><div class="chips" role="group" aria-label="${L('परीक्षा', 'Exam')}"><button class="chip" data-act="learn-ex" data-v="all" aria-pressed="${ex === 'all'}">${L('सभी', 'All')}</button>${EXAMS.map(e => `<button class="chip" data-act="learn-ex" data-v="${e.id}" aria-pressed="${ex === e.id}">${esc(L(e.hi, e.en))}</button>`).join('')}</div></div>
   ${C.baseState === 'error' ? dataErrorNote() : ''}
-  <section class="sec"><h2 class="sec-title">${ic('layers')} ${L('विषय', 'Subjects')}</h2><div class="list">${C.baseState === 'loading' ? skeletonRows(5) : subj || emptyState('layers', L('इस परीक्षा के लिए अभी प्रश्न नहीं', 'No questions for this exam yet'), '')}</div></section>
+  <section class="sec"><h2 class="sec-title">${ic('layers')} ${L('विषय चुनें', 'Choose a subject')}</h2><div class="list subj-list">${C.baseState === 'loading' ? skeletonRows(5) : subj || emptyState('layers', L('इस परीक्षा के लिए अभी प्रश्न नहीं', 'No questions for this exam yet'), '')}</div>
+    <div class="tip">${ic('bulb')}<p>${L('अपनी पसंद का विषय चुनें और ज्ञान की परीक्षा दें।', 'Pick a subject you like and put your knowledge to the test.')}</p></div></section>
   <section class="sec"><h2 class="sec-title">${ic('calendar')} ${L('रोज़ की पढ़ाई', 'Daily learning')}</h2>
     <div class="split"><a class="tile2" href="#ca">${ic('newspaper')}<b>${L('करेंट अफेयर्स', 'Current affairs')}</b><span>${L('दैनिक, साप्ताहिक, मासिक', 'Daily, weekly, monthly')}</span></a><a class="tile2" href="#today">${ic('calendar')}<b>${L('आज का दिन', 'Today in History')}</b><span>${L('3–5 मिनट का दैनिक सत्र', 'A 3–5 minute daily session')}</span></a></div></section>
   <section class="sec"><div class="sec-head"><h2 class="sec-title">${ic('rotate')} ${L('दोहराव', 'Revision')}</h2><a class="link" href="#revise">${L('सब देखें', 'See all')} ${ic('chev-right')}</a></div>
@@ -116,7 +124,7 @@ function vSubject() {
   }).join('');
   return `${appbar(esc(subjName(k)), { back: 'learn', right: `<button class="iconbtn" data-act="search-open" aria-label="${L('प्रश्न खोजें', 'Search questions')}">${ic('search')}</button>` })}
 <main class="page gutter">
-  <section class="card sum"><div class="sum-top"><div class="ringbox">${ring(x.cov / 100, 64, 6)}<b class="tnum" style="font-size:.9rem">${x.cov}%</b></div><span class="row-main"><b>${esc(subjName(k))}</b><span class="row-sub">${L(`${all.length} प्रश्न · सटीकता ${x.acc}%`, `${all.length} questions · ${x.acc}% accuracy`)} · ${mLabel(x.level)}</span></span></div>
+  <section class="card sum"><div class="sum-top"><div class="ringbox">${ring(x.cov / 100, 64, 6, sj.c)}<b class="tnum" style="font-size:.9rem">${x.cov}%</b></div><span class="row-main"><b>${esc(subjName(k))}</b><span class="row-sub">${L(`${all.length} प्रश्न · सटीकता ${x.acc}%`, `${all.length} questions · ${x.acc}% accuracy`)} · ${mLabel(x.level)}</span></span></div>
     <div class="grid2"><button class="btn btn-cta" data-act="start-subject" data-s="${k}" ${pool.length ? '' : 'disabled'}>${ic('play')} ${L('अभ्यास', 'Practise')}</button><button class="btn btn-outline" data-act="exam-pool" data-s="${k}" ${pool.length >= 3 ? '' : 'disabled'}>${ic('clock')} ${L('परीक्षा मोड', 'Exam mode')}</button></div>
     <p class="small muted" style="margin:0">${L('अभ्यास: हर उत्तर पर तुरंत व्याख्या। परीक्षा मोड: समय-सीमा, उत्तर अंत में।', 'Practice: instant explanation after every answer. Exam mode: timed, answers only at the end.')}</p></section>
   ${diffChips()}
