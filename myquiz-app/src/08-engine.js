@@ -93,6 +93,7 @@ function finishSession() {
     U.touch();
     LB.queue();
   }
+  U.flushSoon(); LB.flushSoon();   // save the finished quiz now (self-hosted app batches saves)
   go('result');
   const okN = S.qs.filter(q => S.ans[q.id] && S.ans[q.id].ok).length;
   if (S.qs.length >= 3 && okN / S.qs.length >= 0.7) celebrate();
@@ -192,6 +193,7 @@ function submitExam(auto = false) {
   LS.set('lastExam', lastExam);
   LS.del('exam');
   E = null;
+  U.flushSoon(); LB.flushSoon();
   closeSheet();
   go('exam-result');
   if (auto) toast(L('समय समाप्त — परीक्षा अपने-आप सबमिट हो गई', 'Time is up: the test was submitted automatically'), 'info');

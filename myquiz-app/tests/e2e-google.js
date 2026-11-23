@@ -7,7 +7,7 @@ let fails = 0;
 const step = m => console.log('•', m);
 const check = (ok, m) => { if (!ok) fails++; console.log(ok ? '  ✔' : '  ✘ FAIL', m); };
 
-const CONFIG = `window.MYQUIZ_CONFIG = Object.assign({ firebase: { apiKey: 'test-key', authDomain: 'test.firebaseapp.com', projectId: 'test', appId: '1:1:web:1' }, allowGuest: true }, window.MYQUIZ_CONFIG || {});`;
+const CONFIG = `window.MYQUIZ_CONFIG = Object.assign({ firebase: { apiKey: 'test-key', authDomain: 'test.firebaseapp.com', projectId: 'test', appId: '1:1:web:1' }, allowGuest: true, syncMs: 1500, lbSyncMs: 2500 }, window.MYQUIZ_CONFIG || {});`;
 const FAKE = `(() => {
   const K = '__fbmock';
   const load = () => { try { return JSON.parse(localStorage.getItem(K)) || { user: null, store: {} }; } catch { return { user: null, store: {} }; } };
@@ -18,7 +18,8 @@ const FAKE = `(() => {
   const freeze = o => JSON.parse(JSON.stringify(o));
   const snapDoc = path => { const d = st.store[path]; return { id: segs(path).pop(), exists: d !== undefined, data: () => (d === undefined ? undefined : freeze(d)), metadata: { fromCache: false } }; };
   const docsOf = coll => Object.keys(st.store).filter(k => { const s = segs(k); return s.length === segs(coll).length + 1 && k.startsWith(coll + '/'); }).sort().map(snapDoc);
-  const notify = () => { save(); for (const l of listeners) setTimeout(() => l.kind === 'c' ? l.fn({ docs: docsOf(l.path), metadata: { fromCache: false } }) : l.fn(snapDoc(l.path)), 5); };
+  const notify = () => { save(); for (const l of listeners) setTimeout(() => l.kind === 'q' ? l.fn({ docs: l.run(), metadata: { fromCache: false } }) : l.fn(snapDoc(l.path)), 5); };
+  const stamp = o => { for (const k of Object.keys(o)) if (o[k] && o[k].__ts) o[k] = Date.now(); return o; };   // serverTimestamp()
   const denied = () => Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
   const uid = () => st.user && st.user.uid;
   const isAdmin = () => !!(st.user && st.store['admins/' + st.user.email]);
@@ -35,12 +36,23 @@ const FAKE = `(() => {
   const canRead = path => { const s = segs(path); if (s[0] === 'pub') return true; if (!uid()) return false; if (s[0] === 'cms' || (s[0] === 'reports' && s.length === 1)) return isAdmin(); if (s[0] === 'data') return s[2] === uid(); return true; };
   const doc = path => ({ id: segs(path).pop(), path,
     get: async () => { if (!canRead(path)) throw denied(); return snapDoc(path); },
-    set: async data => { if (!canWrite(path)) throw denied(); st.store[path] = freeze(data); window.__writes = (window.__writes || 0) + 1; notify(); },
+    set: async data => { if (!canWrite(path)) throw denied(); st.store[path] = stamp(freeze(data)); window.__writes = (window.__writes || 0) + 1; notify(); },
     delete: async () => { if (!canWrite(path)) throw denied(); delete st.store[path]; notify(); },
     onSnapshot: (fn, err) => { if (!canRead(path)) { setTimeout(() => err && err(denied()), 5); return () => {}; } const l = { kind: 'd', path, fn }; listeners.add(l); setTimeout(() => fn(snapDoc(path)), 5); return () => listeners.delete(l); } });
-  const collection = path => ({ path,
-    get: async () => { if (!canRead(path)) throw denied(); return { docs: docsOf(path), metadata: { fromCache: false } }; },
-    onSnapshot: (fn, err) => { if (!canRead(path)) { setTimeout(() => err && err(denied()), 5); return () => {}; } const l = { kind: 'c', path, fn }; listeners.add(l); setTimeout(() => fn({ docs: docsOf(path), metadata: { fromCache: false } }), 5); return () => listeners.delete(l); } });
+  // Queries: where (== and >), orderBy, limit; the offline cache starts empty, as on a new phone.
+  const run = (path, conds, order, lim) => {
+    let docs = docsOf(path);
+    for (const [f, op, v] of conds) docs = docs.filter(d => { const x = (d.data() || {})[f]; return op === '==' ? x === v : op === '>' ? x > v : true; });
+    if (order) docs = docs.slice().sort((a, b) => { const x = Number((a.data() || {})[order[0]]) || 0, y = Number((b.data() || {})[order[0]]) || 0; return order[1] === 'desc' ? y - x : x - y; });
+    return lim ? docs.slice(0, lim) : docs;
+  };
+  const query = (path, conds = [], order = null, lim = 0) => ({ path,
+    where: (f, op, v) => query(path, [...conds, [f, op, v]], order, lim),
+    orderBy: (f, dir = 'asc') => query(path, conds, [f, dir], lim),
+    limit: n => query(path, conds, order, n),
+    get: async opts => { if (!canRead(path)) throw denied(); window.__reads = (window.__reads || 0) + 1; return opts && opts.source === 'cache' ? { docs: [], metadata: { fromCache: true } } : { docs: run(path, conds, order, lim), metadata: { fromCache: false } }; },
+    onSnapshot: (fn, err) => { if (!canRead(path)) { setTimeout(() => err && err(denied()), 5); return () => {}; } if (path === 'lb' && !conds.length) window.__fullLb = (window.__fullLb || 0) + 1; const l = { kind: 'q', path, fn, run: () => run(path, conds, order, lim) }; listeners.add(l); setTimeout(() => fn({ docs: l.run(), metadata: { fromCache: false } }), 5); return () => listeners.delete(l); } });
+  const collection = path => query(path);
   const authCbs = [];
   const auth = {
     get currentUser() { return st.user && Object.assign({}, st.user, { reauthenticateWithPopup: async () => ({ user: st.user }), reauthenticateWithRedirect: async () => {}, delete: async () => { st.deleted = (st.deleted || []).concat(st.user.uid); st.user = null; save(); authCbs.forEach(cb => cb(null)); } }); },
@@ -53,7 +65,7 @@ const FAKE = `(() => {
   function GoogleAuthProvider() { this.setCustomParameters = () => {}; }
   const fs = { doc, collection, enablePersistence: async () => {} };
   const apps = [];
-  window.firebase = { apps, initializeApp: c => { apps.push(c); return {}; }, auth: Object.assign(() => auth, { GoogleAuthProvider }), firestore: () => fs };
+  window.firebase = { apps, initializeApp: c => { apps.push(c); return {}; }, auth: Object.assign(() => auth, { GoogleAuthProvider }), firestore: Object.assign(() => fs, { FieldValue: { serverTimestamp: () => ({ __ts: 1 }) } }) };
   window.__fb = { st, save };
 })();`;
 
@@ -134,6 +146,28 @@ const FAKE = `(() => {
   check(pub.length === 1 && s[pub[0]].q.includes('SI'), 'published question is in Firestore for all students');
   check(Object.keys(s).filter(k => k.startsWith('cms/drafts/items/')).length === 0, 'draft removed after publishing');
 
+  // 4b. Removing published content leaves a tombstone (with the server time), so every phone drops it too
+  const pid = pub[0].split('/').pop();
+  await go('admin-bank', '#bank-search');
+  await page.fill('#bank-search', 'SI');
+  await page.waitForSelector(`[data-act="bank-remove"][data-id="${pid}"]`);
+  await page.click(`[data-act="bank-remove"][data-id="${pid}"]`);
+  await page.click('.sheet [data-act="confirm-ok"]');
+  await page.waitForTimeout(500);
+  s = await store();
+  check(s[pub[0]] && s[pub[0]].gone === true && typeof s[pub[0]].ts === 'number', 'removing published content leaves a tombstone with the server time');
+  await page.fill('#bank-search', 'SI'); await page.waitForTimeout(250);
+  check(!(await page.$(`[data-act="bank-remove"][data-id="${pid}"]`)), 'the removed question disappears from the app');
+
+  // 4c. The leaderboard reads only each board's top 50, never the whole collection
+  const meLb = (await store())['lb/g_asha'];
+  await page.evaluate(m => { for (let i = 0; i < 55; i++) window.__fb.st.store['lb/g_s' + i] = { n: 'Student ' + i, wk: m.wk, wp: 1000 + i, pw: m.pw, pwp: 0, mo: m.mo, mp: 1000 + i, pm: m.pm, pmp: 0, tp: 1000 + i, at: Date.now() }; window.__fb.save(); }, meLb);
+  await page.reload();
+  await go('leaders', '.lb-head');
+  check((await page.textContent('.lb-head')).includes('50+'), 'below the top 50 a rank shows as 50+');
+  check((await page.$$('.podium .pod, .lb-list .lrow')).length >= 40, 'the board lists the top students');
+  check(!(await page.evaluate(() => window.__fullLb)), 'the app never downloads the whole leaderboard');
+
   // 5. Sign out clears this phone; another student sees none of Asha's progress
   await go('profile', '[data-act="signout"]');
   await page.click('[data-act="signout"]');
@@ -197,10 +231,11 @@ const FAKE = `(() => {
     for (const f of ['app', 'auth', 'firestore']) await new Promise((res, rej) => { const s = document.createElement('script'); s.src = '/vendor/firebase-10.12.2/firebase-' + f + '-compat.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
     const app = firebase.initializeApp({ apiKey: 'x', authDomain: 'x.firebaseapp.com', projectId: 'x', appId: '1:1:web:1' });
     const db = firebase.firestore(), d = db.doc('a/b'), c = db.collection('a');
-    return { version: firebase.SDK_VERSION, doc: typeof d.onSnapshot, coll: typeof c.onSnapshot, auth: typeof firebase.auth().signInWithPopup, provider: typeof firebase.auth.GoogleAuthProvider, app: !!app };
+    return { version: firebase.SDK_VERSION, doc: typeof d.onSnapshot, coll: typeof c.onSnapshot, auth: typeof firebase.auth().signInWithPopup, provider: typeof firebase.auth.GoogleAuthProvider, app: !!app, query: typeof c.where('x', '==', 1).orderBy('y', 'desc').limit(5).get, ts: typeof firebase.firestore.Timestamp.fromMillis, sv: typeof firebase.firestore.FieldValue.serverTimestamp };
   });
   step('real SDK: ' + JSON.stringify(api));
   check(api.version === '10.12.2' && api.doc === 'function' && api.coll === 'function' && api.auth === 'function' && api.provider === 'function', 'vendored Firebase SDK exposes the compat API');
+  check(api.query === 'function' && api.ts === 'function' && api.sv === 'function', 'real SDK supports the leaderboard queries and server timestamps');
 
   await browser.close();
   console.log(`\nERRORS (${errors.length}):` + (errors.length ? '\n  ' + [...new Set(errors)].join('\n  ') : ''));

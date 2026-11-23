@@ -158,7 +158,7 @@ function lbAvatar(r, i = -1) {
   return `<span class="lb-av${i >= 0 && i < 3 ? ' medal' : ''}"${style} aria-hidden="true">${esc(initial(r.n))}</span>`;
 }
 function lbRow(r) {
-  return `<li class="lrow${r.me ? ' me' : ''}"${r.me ? ' aria-current="true"' : ''}><span class="lrank tnum">${r.rank ? r.rank : '–'}</span>${lbAvatar(r)}<span class="lname">${esc(r.n)}${r.me ? ` <span class="tag tag-live">${L('आप', 'You')}</span>` : ''}</span><span class="lpts tnum">${fmtNum(r.p)}</span></li>`;
+  return `<li class="lrow${r.me ? ' me' : ''}"${r.me ? ' aria-current="true"' : ''}><span class="lrank tnum">${r.beyond ? LB_TOP + '+' : r.rank ? r.rank : '–'}</span>${lbAvatar(r)}<span class="lname">${esc(r.n)}${r.me ? ` <span class="tag tag-live">${L('आप', 'You')}</span>` : ''}</span><span class="lpts tnum">${fmtNum(r.p)}</span></li>`;
 }
 function podium(top) {
   // Ranked order in the markup (1, 2, 3) for screen readers; CSS places #1 in the middle.
@@ -200,7 +200,7 @@ function vLeaders() {
   const tabs = `<div class="seg seg-4" role="group" aria-label="${L('लीडरबोर्ड अवधि', 'Leaderboard period')}">${LB_TABS.map(([v, hi, en]) => `<button data-act="lb-tab" data-v="${v}" aria-pressed="${tab === v}">${L(hi, en)}</button>`).join('')}</div>`;
   let body;
   if (tab === 'winners') body = vWinners();
-  else if (P.cdb && LB.state === 'loading') body = `<div class="list">${skeletonRows(5)}</div>`;
+  else if ((P.cdb && LB.state === 'loading') || !LB.loaded(tab)) body = `<div class="list">${skeletonRows(5)}</div>`;
   else {
     const rows = LB.board(tab), per = lbPeriod(tab);
     const ranked = rows.filter(r => r.p > 0);
@@ -211,7 +211,7 @@ function vLeaders() {
     body = `<section class="lb-head">
       <div class="lb-period"><b>${esc(per.label)}</b><span>${per.note}</span></div>
       ${per.prize ? `<p class="prize-line">${ic('gift')} ${L('इनाम', 'Prize')}: ${esc(per.prize)}</p>` : ''}
-      <div class="lb-mine">${U.s.lb.hide ? `<span>${ic('lock')} ${L('आप छिपे हुए हैं', 'You are hidden')}</span>` : `<span>${L('आपके पॉइंट्स', 'Your points')}: <b class="tnum">${fmtNum(myPts)}</b></span><span>${L('रैंक', 'Rank')}: <b class="tnum">${mine && mine.rank ? '#' + mine.rank : '–'}</b></span>`}</div>
+      <div class="lb-mine">${U.s.lb.hide ? `<span>${ic('lock')} ${L('आप छिपे हुए हैं', 'You are hidden')}</span>` : `<span>${L('आपके पॉइंट्स', 'Your points')}: <b class="tnum">${fmtNum(myPts)}</b></span><span>${L('रैंक', 'Rank')}: <b class="tnum">${mine && mine.rank ? (mine.beyond ? LB_TOP + '+' : '#' + mine.rank) : '–'}</b></span>`}</div>
     </section>
     ${top.length ? podium(top) : `<div class="card">${emptyState('trophy', tab === 'lastweek' ? L('पिछले सप्ताह कोई पॉइंट्स नहीं मिले', 'No points were earned last week') : L('अभी किसी के पॉइंट्स नहीं', 'Nobody has points yet'), tab === 'lastweek' ? '' : L('एक क्विज खेलें और लीडरबोर्ड पर सबसे पहले आएँ!', 'Play a quiz and be first on the board!'))}${tab !== 'lastweek' ? `<button class="btn btn-cta btn-block" data-act="start-daily" ${C.baseState !== 'ok' ? 'disabled' : ''}>${ic('zap')} ${L('दैनिक क्विज खेलें', 'Play the daily quiz')}</button>` : ''}</div>`}
     ${rest.length ? `<ol class="lb-list">${rest.map(lbRow).join('')}</ol>` : ''}

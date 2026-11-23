@@ -589,8 +589,36 @@ function loadLocalCms() {
   C.reports = LS.get('cms.reports', []) || [];
   C.liveState = 'ok'; C.cmsState = 'ok';
 }
+// Self-hosted (Firestore) content sync: start from this phone's cached copy (free), then listen only to items
+// changed since then. Every admin write stamps `ts` with the server's time and a removal leaves a tombstone
+// (`gone: true`), so the incremental listener sees everything and reads stay flat as content grows.
+const tsMs = v => (typeof v === 'number' ? v : v && typeof v.toMillis === 'function' ? v.toMillis() : 0);
+const fsTs = ms => (window.firebase && firebase.firestore && firebase.firestore.Timestamp ? firebase.firestore.Timestamp.fromMillis(ms) : ms);
+const serverTs = () => firebase.firestore.FieldValue.serverTimestamp();
+async function syncPubCloud(k, check, timer) {
+  const col = P.cdb.collection(`pub/${k}/items`), items = new Map();
+  const take = docs => { for (const d of docs) items.set(d.id, { ...d.data(), id: d.id }); C.pub[k] = [...items.values()].filter(check); };
+  let cached = [];
+  try { cached = (await col.get({ source: 'cache' })).docs; } catch { /* no offline copy yet */ }
+  if (cached.length) take(cached);
+  else take((await col.get()).docs);
+  bump();
+  const mark = Math.max(0, ...[...items.values()].map(x => tsMs(x.ts))) - 10 * 60e3;   // 10 minutes of overlap
+  col.where('ts', '>', fsTs(Math.max(0, mark))).onSnapshot(snap => {
+    take(snap.docs);
+    if (!snap.metadata.fromCache) { clearTimeout(timer); C.liveState = 'ok'; }
+    bump();
+  }, () => { clearTimeout(timer); C.liveState = 'error'; bump(); });
+}
 function subscribeLive() {
   if (!P.cdb) { C.liveState = 'off'; return; }
+  if (P.cloud) {
+    C.liveState = 'loading';
+    const timer = setTimeout(() => { if (C.liveState === 'loading') { C.liveState = 'slow'; bump(); } }, 10000);
+    const check = { q: validQ, news: validNews, days: validDay };
+    for (const k of Object.keys(check)) syncPubCloud(k, check[k], timer).catch(() => { clearTimeout(timer); C.liveState = 'error'; bump(); });
+    return;
+  }
   C.liveState = 'loading';
   const timer = setTimeout(() => { if (C.liveState === 'loading') { C.liveState = 'slow'; bump(); } }, 10000);
   const check = { q: validQ, news: validNews, days: validDay };
@@ -748,6 +776,7 @@ const CMS = {
   },
   async putPub(coll, item) {
     const doc = clone(item);
+    if (P.cloud) { delete doc.gone; doc.ts = serverTs(); }   // the sync stamp students' phones listen for
     if (P.cdb) await P.cdb.doc(`pub/${coll}/items/${doc.id}`).set(doc);
     else { const arr = C.pub[coll]; const i = arr.findIndex(x => x.id === doc.id); if (i >= 0) arr[i] = doc; else arr.push(doc); this.saveLocal(); bump(); }
   },
@@ -759,7 +788,8 @@ const CMS = {
     await this.delDraft(d.id);
   },
   async unpublish(coll, id) {
-    if (P.cdb) await P.cdb.doc(`pub/${coll}/items/${id}`).delete();
+    if (P.cloud) await P.cdb.doc(`pub/${coll}/items/${id}`).set({ id, gone: true, ts: serverTs() });   // a tombstone, so phones drop it too
+    else if (P.cdb) await P.cdb.doc(`pub/${coll}/items/${id}`).delete();
     else { C.pub[coll] = C.pub[coll].filter(x => x.id !== id); this.saveLocal(); bump(); }
   },
   async hide(coll, id) { await this.putPub(coll, { id, hidden: true, publishAt: todayISO(), publishedAt: Date.now() }); },
@@ -844,7 +874,10 @@ const U = {
     } catch { P.progressRemote = false; }
   },
   touch() { this.s.updatedAt = Date.now(); LS.set('progress', this.s); this.queue(); },
-  queue() { if (!P.progressRemote) return; clearTimeout(this.t); this.t = setTimeout(() => this.flush(), 1500); },
+  // Self-hosted (Firestore): save in batches to keep writes low; flushSoon() saves at the end of a quiz
+  // and when the app goes to the background (this phone keeps everything meanwhile).
+  queue() { if (!P.progressRemote) return; clearTimeout(this.t); this.t = setTimeout(() => { this.t = 0; this.flush(); }, P.cloud ? (Number(CFG.syncMs) || 15000) : 1500); },
+  flushSoon(ms = 800) { if (!this.t) return; clearTimeout(this.t); this.t = setTimeout(() => { this.t = 0; this.flush(); }, ms); },
   async flush() {
     if (!P.progressRemote) return;
     if (this.busy) { this.again = true; return; }
@@ -1014,10 +1047,18 @@ function applySettings() {
 // Totals for the current and previous week/month are recomputed from the learner's own daily points,
 // so "last week" boards keep working even for learners who have not opened the app this week.
 const SAMPLE_NAMES = [['अनन्या', 'Ananya'], ['रोहित', 'Rohit'], ['सना', 'Sana'], ['विक्रम', 'Vikram'], ['मेघा', 'Megha'], ['आदित्य', 'Aditya'], ['पूजा', 'Pooja'], ['करण', 'Karan'], ['नेहा', 'Neha']];
+// Self-hosted app (Firestore): each board reads only its top students, when a screen needs it, so the
+// number of reads stays flat as students grow. Totals are saved in batches (see LB_SYNC_MS) and right away
+// at the end of a quiz or when the app goes to the background. Needs the indexes in firestore.indexes.json.
+const LB_TOP = 50, LB_TOP_ADMIN = 500, LB_FRESH_MS = 120e3;
+const LB_SYNC_MS = Number(CFG.lbSyncMs) || 30000;
+// The boards each screen shows; the self-hosted app loads only those (router: LB.ensure).
+const LB_NEED = { home: ['week'], compete: ['week'], profile: ['week'], 'leaders-week': ['week'], 'leaders-lastweek': ['lastweek'], 'leaders-month': ['month'], admin: ['week', 'lastweek'], 'admin-rewards': ['week', 'month', 'lastweek', 'lastmonth'], 'admin-analytics': ['week'] };
 const LB = {
   entries: [], winners: [], hidden: [],
   settings: { weekPrize: '', weekPrizeEn: '', monthPrize: '', monthPrizeEn: '' },
   state: 'idle', t: 0, busy: false, again: false, denied: false,
+  cloud: { docs: {}, at: {}, top: {}, busy: {} },
   canShare() { return !!(P.cdb && P.uid) && !this.denied; },
   myId() { return P.uid || 'me'; },
   // The published name is the learner's chosen display name (or first name). Learners without one are
@@ -1029,7 +1070,9 @@ const LB = {
     const t = todayISO(), wk = weekKey(t), pw = addDays(wk, -7), mo = monthKey(t), pm = prevMonthKey(mo);
     return { n: this.pubName(), wk, wp: U.ptsWeek(wk), pw, pwp: U.ptsWeek(pw), mo, mp: U.ptsMonth(mo), pm, pmp: U.ptsMonth(pm), tp: U.s.pts.total, at: Date.now() };
   },
-  queue() { if (!this.canShare()) return; clearTimeout(this.t); this.t = setTimeout(() => this.push(), 2500); },
+  queue() { if (!this.canShare()) return; clearTimeout(this.t); this.t = setTimeout(() => { this.t = 0; this.push(); }, P.cloud ? LB_SYNC_MS : 2500); },
+  // Save a pending total now (end of a quiz, app going to the background).
+  flushSoon(ms = 1200) { if (!this.t) return; clearTimeout(this.t); this.t = setTimeout(() => { this.t = 0; this.push(); }, ms); },
   async push() {
     if (!this.canShare()) return;
     if (this.busy) { this.again = true; return; }
@@ -1047,11 +1090,12 @@ const LB = {
     this.state = 'loading';
     const refresh = () => { if (['leaders', 'home', 'profile', 'admin-rewards'].includes(route)) scheduleRender(); };
     try {
-      P.cdb.collection('lb').onSnapshot(snap => {
+      if (P.cloud) this.state = 'ok';   // boards load on demand: ensure()
+      else P.cdb.collection('lb').onSnapshot(snap => {
         this.entries = snap.docs.map(d => ({ ...d.data(), u: d.id })).filter(e => typeof e.n === 'string');
         this.state = 'ok'; refresh();
       }, () => { this.state = 'error'; refresh(); });
-      P.cdb.collection('pub/winners/items').onSnapshot(snap => {
+      (P.cloud ? P.cdb.collection('pub/winners/items').orderBy('at', 'desc').limit(8) : P.cdb.collection('pub/winners/items')).onSnapshot(snap => {
         this.winners = snap.docs.map(d => ({ ...d.data(), id: d.id })).filter(w => Array.isArray(w.top) && (w.kind === 'week' || w.kind === 'month'));
         this.checkWon(); refresh();
       }, () => { /* winners are optional */ });
@@ -1076,7 +1120,32 @@ const LB = {
       return { u: 'sample-' + i, sample: true, n: `${L(hi, en)} ${L('(उदाहरण)', '(sample)')}`, wk, wp, pw: lw, pwp, mo, mp: wp + Math.round(pwp * 0.8), pm: lm, pmp: Math.round(pwp * 3.4), tp: pwp * 6 };
     });
   },
-  pool() { return P.demo ? this.samples() : P.cdb ? this.entries : []; },
+  pool(kind) { return P.demo ? this.samples() : P.cloud ? (this.cloud.docs[kind] || []) : P.cdb ? this.entries : []; },
+  loaded(kind) { return !P.cloud || !!this.cloud.at[kind]; },
+  // Fetch a board's top students when a screen needs it (at most every 2 minutes per board).
+  ensure(kinds, top = LB_TOP) {
+    if (!P.cloud || !P.cdb || !P.uid) return;
+    for (const kind of kinds) {
+      const c = this.cloud;
+      if (c.busy[kind] || (Date.now() - (c.at[kind] || 0) < LB_FRESH_MS && (c.top[kind] || 0) >= top)) continue;
+      c.busy[kind] = true;
+      this.fetchKind(kind, top)
+        .then(docs => { c.docs[kind] = docs; c.top[kind] = top; this.state = 'ok'; })
+        .catch(() => { this.state = 'error'; })
+        .finally(() => { c.at[kind] = Date.now(); c.busy[kind] = false; scheduleRender(); });
+    }
+  },
+  async fetchKind(kind, top) {
+    const t = todayISO(), wk = weekKey(t), lw = addDays(wk, -7), mo = monthKey(t), lm = prevMonthKey(mo);
+    const q = (key, val, pts) => P.cdb.collection('lb').where(key, '==', val).orderBy(pts, 'desc').limit(top).get();
+    const snaps = kind === 'week' ? [await q('wk', wk, 'wp')]
+      : kind === 'month' ? [await q('mo', mo, 'mp')]
+        : kind === 'lastweek' ? await Promise.all([q('wk', lw, 'wp'), q('pw', lw, 'pwp')])
+          : await Promise.all([q('mo', lm, 'mp'), q('pm', lm, 'pmp')]);
+    const map = new Map();
+    for (const s of snaps) for (const d of s.docs) map.set(d.id, { ...d.data(), u: d.id });
+    return [...map.values()].filter(e => typeof e.n === 'string');
+  },
   board(kind) {
     const t = todayISO(), wk = weekKey(t), lw = addDays(wk, -7), mo = monthKey(t), lm = prevMonthKey(mo);
     const val = e => (kind === 'week' ? (e.wk === wk ? e.wp : 0)
@@ -1084,15 +1153,18 @@ const LB = {
         : kind === 'month' ? (e.mo === mo ? e.mp : 0)
           : (e.mo === lm ? e.mp : e.pm === lm ? e.pmp : 0));
     const me = this.myId();
-    const rows = this.pool().filter(e => e.u !== me && !this.hidden.includes(e.u))
+    const rows = this.pool(kind).filter(e => e.u !== me && !this.hidden.includes(e.u))
       .map(e => ({ u: e.u, n: this.display(e), raw: String(e.n || '').slice(0, 30), p: Math.max(0, Number(val(e)) || 0), sample: !!e.sample }));
     if (!U.s.lb.hide) rows.push({ u: me, n: this.myName(), raw: this.pubName(), p: val(this.myEntry()), me: true });
     const list = rows.filter(r => r.p > 0 || r.me).sort((a, b) => b.p - a.p || (a.me ? -1 : b.me ? 1 : a.n.localeCompare(b.n)));
     let rank = 0, prev = null;
     list.forEach((r, i) => { if (r.p !== prev) { rank = i + 1; prev = r.p; } r.rank = r.p > 0 ? rank : null; });
+    // Self-hosted: only the top students are read, so below them a learner's exact rank is unknown ("50+").
+    const got = (this.cloud.docs[kind] || []).length, cap = this.cloud.top[kind] || LB_TOP;
+    if (P.cloud && got >= cap) { const mine = list.find(r => r.me); if (mine && mine.rank && mine.rank > cap) { mine.beyond = true; mine.rank = cap + 1; } }
     return list;
   },
-  myRank(kind) { const r = this.board(kind).find(x => x.me); return r && r.rank ? r.rank : null; },
+  myRank(kind) { if (!this.loaded(kind)) return null; const r = this.board(kind).find(x => x.me); return r && r.rank && !r.beyond ? r.rank : null; },
   winnersFor(kind) { return this.winners.filter(w => w.kind === kind).sort((a, b) => String(b.key).localeCompare(String(a.key))); },
   checkWon() {
     const me = this.myId();
@@ -1224,6 +1296,7 @@ function finishSession() {
     U.touch();
     LB.queue();
   }
+  U.flushSoon(); LB.flushSoon();   // save the finished quiz now (self-hosted app batches saves)
   go('result');
   const okN = S.qs.filter(q => S.ans[q.id] && S.ans[q.id].ok).length;
   if (S.qs.length >= 3 && okN / S.qs.length >= 0.7) celebrate();
@@ -1323,6 +1396,7 @@ function submitExam(auto = false) {
   LS.set('lastExam', lastExam);
   LS.del('exam');
   E = null;
+  U.flushSoon(); LB.flushSoon();
   closeSheet();
   go('exam-result');
   if (auto) toast(L('समय समाप्त — परीक्षा अपने-आप सबमिट हो गई', 'Time is up: the test was submitted automatically'), 'info');
@@ -1421,6 +1495,40 @@ function shareText(text) {
   if (P.mode === 'standalone' && navigator.share) { navigator.share({ text }).catch(() => {}); return; }
   copyText(text);
 }
+
+// ───────────────────────────── AdSense (self-hosted app only) ─────────────────────────────
+// Off until config.js has `adsense: { client: 'ca-pub-…', slot: '…' }`. One responsive ad unit sits BELOW a
+// page's content (outside #app, so re-renders never reload it), on reading and dashboard screens only —
+// never on quiz, exam, flashcard, sign-in, onboarding, profile or admin screens. A new ad is requested only
+// when the learner moves to another screen (a new page view), never on a timer.
+const AD_ROUTES = new Set(['home', 'learn', 'subject', 'chapter', 'ca', 'news', 'today', 'compete', 'leaders', 'progress', 'result', 'exam-result', 'bookmarks']);
+const Ads = {
+  cfg: CFG.adsense && /^ca-pub-\d{6,}$/.test(String(CFG.adsense.client || '')) && /^\d{4,}$/.test(String(CFG.adsense.slot || '')) ? CFG.adsense : null,
+  root: null, loaded: false,
+  on() { return !!this.cfg && P.mode === 'standalone' && !DEMO; },
+  load() {
+    if (this.loaded) return;
+    this.loaded = true;
+    const s = document.createElement('script');
+    s.async = true; s.crossOrigin = 'anonymous';
+    s.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=' + encodeURIComponent(this.cfg.client);
+    document.head.appendChild(s);
+  },
+  // Called by render(): show, replace or remove the unit for the current screen.
+  onRoute(routeChanged) {
+    if (!this.on()) return;
+    const app = $('#app');
+    const allowed = AD_ROUTES.has(route) && !authGate();
+    if (!this.root) { this.root = document.createElement('aside'); this.root.id = 'ad-root'; this.root.hidden = true; this.root.setAttribute('aria-label', L('विज्ञापन', 'Advertisement')); app.after(this.root); }
+    if (!allowed) { this.root.hidden = true; this.root.textContent = ''; app.classList.remove('has-ad'); return; }
+    app.classList.add('has-ad');
+    this.root.hidden = false;
+    if (!routeChanged && this.root.querySelector('ins')) return;   // same screen re-rendered: keep the ad as it is
+    this.load();
+    this.root.innerHTML = `<p class="ad-label">${L('विज्ञापन', 'Advertisement')}</p><ins class="adsbygoogle" style="display:block" data-ad-client="${esc(this.cfg.client)}" data-ad-slot="${esc(this.cfg.slot)}" data-ad-format="auto" data-full-width-responsive="true"></ins>`;
+    try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch { /* an ad blocker: the page works without ads */ }
+  },
+};
 
 // ───────────────────────────── views: learner ─────────────────────────────
 function notifications() {
@@ -1715,7 +1823,7 @@ function lbAvatar(r, i = -1) {
   return `<span class="lb-av${i >= 0 && i < 3 ? ' medal' : ''}"${style} aria-hidden="true">${esc(initial(r.n))}</span>`;
 }
 function lbRow(r) {
-  return `<li class="lrow${r.me ? ' me' : ''}"${r.me ? ' aria-current="true"' : ''}><span class="lrank tnum">${r.rank ? r.rank : '–'}</span>${lbAvatar(r)}<span class="lname">${esc(r.n)}${r.me ? ` <span class="tag tag-live">${L('आप', 'You')}</span>` : ''}</span><span class="lpts tnum">${fmtNum(r.p)}</span></li>`;
+  return `<li class="lrow${r.me ? ' me' : ''}"${r.me ? ' aria-current="true"' : ''}><span class="lrank tnum">${r.beyond ? LB_TOP + '+' : r.rank ? r.rank : '–'}</span>${lbAvatar(r)}<span class="lname">${esc(r.n)}${r.me ? ` <span class="tag tag-live">${L('आप', 'You')}</span>` : ''}</span><span class="lpts tnum">${fmtNum(r.p)}</span></li>`;
 }
 function podium(top) {
   // Ranked order in the markup (1, 2, 3) for screen readers; CSS places #1 in the middle.
@@ -1757,7 +1865,7 @@ function vLeaders() {
   const tabs = `<div class="seg seg-4" role="group" aria-label="${L('लीडरबोर्ड अवधि', 'Leaderboard period')}">${LB_TABS.map(([v, hi, en]) => `<button data-act="lb-tab" data-v="${v}" aria-pressed="${tab === v}">${L(hi, en)}</button>`).join('')}</div>`;
   let body;
   if (tab === 'winners') body = vWinners();
-  else if (P.cdb && LB.state === 'loading') body = `<div class="list">${skeletonRows(5)}</div>`;
+  else if ((P.cdb && LB.state === 'loading') || !LB.loaded(tab)) body = `<div class="list">${skeletonRows(5)}</div>`;
   else {
     const rows = LB.board(tab), per = lbPeriod(tab);
     const ranked = rows.filter(r => r.p > 0);
@@ -1768,7 +1876,7 @@ function vLeaders() {
     body = `<section class="lb-head">
       <div class="lb-period"><b>${esc(per.label)}</b><span>${per.note}</span></div>
       ${per.prize ? `<p class="prize-line">${ic('gift')} ${L('इनाम', 'Prize')}: ${esc(per.prize)}</p>` : ''}
-      <div class="lb-mine">${U.s.lb.hide ? `<span>${ic('lock')} ${L('आप छिपे हुए हैं', 'You are hidden')}</span>` : `<span>${L('आपके पॉइंट्स', 'Your points')}: <b class="tnum">${fmtNum(myPts)}</b></span><span>${L('रैंक', 'Rank')}: <b class="tnum">${mine && mine.rank ? '#' + mine.rank : '–'}</b></span>`}</div>
+      <div class="lb-mine">${U.s.lb.hide ? `<span>${ic('lock')} ${L('आप छिपे हुए हैं', 'You are hidden')}</span>` : `<span>${L('आपके पॉइंट्स', 'Your points')}: <b class="tnum">${fmtNum(myPts)}</b></span><span>${L('रैंक', 'Rank')}: <b class="tnum">${mine && mine.rank ? (mine.beyond ? LB_TOP + '+' : '#' + mine.rank) : '–'}</b></span>`}</div>
     </section>
     ${top.length ? podium(top) : `<div class="card">${emptyState('trophy', tab === 'lastweek' ? L('पिछले सप्ताह कोई पॉइंट्स नहीं मिले', 'No points were earned last week') : L('अभी किसी के पॉइंट्स नहीं', 'Nobody has points yet'), tab === 'lastweek' ? '' : L('एक क्विज खेलें और लीडरबोर्ड पर सबसे पहले आएँ!', 'Play a quiz and be first on the board!'))}${tab !== 'lastweek' ? `<button class="btn btn-cta btn-block" data-act="start-daily" ${C.baseState !== 'ok' ? 'disabled' : ''}>${ic('zap')} ${L('दैनिक क्विज खेलें', 'Play the daily quiz')}</button>` : ''}</div>`}
     ${rest.length ? `<ol class="lb-list">${rest.map(lbRow).join('')}</ol>` : ''}
@@ -4159,6 +4267,8 @@ function render(routeChanged = false) {
   app.classList.toggle('no-nav', NO_NAV.has(route) || !!authGate());
   app.classList.toggle('exam-pad', route === 'exam');
   app.classList.toggle('enter', !!routeChanged);
+  if (P.cloud && P.uid) LB.ensure(LB_NEED[route === 'leaders' ? 'leaders-' + lbTab : route] || [], route.startsWith('admin') ? LB_TOP_ADMIN : LB_TOP);
+  Ads.onRoute(routeChanged);
   if (routeChanged) window.scrollTo(0, 0);
   if (DEMO) renderDemoStrip();
   afterRender();
@@ -4242,6 +4352,9 @@ document.addEventListener('keydown', e => {
 });
 // Save right away when the app goes to the background, so the leaderboard never misses points.
 window.addEventListener('online', () => { render(); toast(L('आप फिर ऑनलाइन हैं', 'You are back online')); });
+// Save batched progress and points when the app goes to the background or closes (self-hosted app).
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { U.flushSoon(0); LB.flushSoon(0); } });
+window.addEventListener('pagehide', () => { U.flushSoon(0); LB.flushSoon(0); });
 window.addEventListener('offline', () => render());
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'hidden') return;

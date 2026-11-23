@@ -27,8 +27,36 @@ function loadLocalCms() {
   C.reports = LS.get('cms.reports', []) || [];
   C.liveState = 'ok'; C.cmsState = 'ok';
 }
+// Self-hosted (Firestore) content sync: start from this phone's cached copy (free), then listen only to items
+// changed since then. Every admin write stamps `ts` with the server's time and a removal leaves a tombstone
+// (`gone: true`), so the incremental listener sees everything and reads stay flat as content grows.
+const tsMs = v => (typeof v === 'number' ? v : v && typeof v.toMillis === 'function' ? v.toMillis() : 0);
+const fsTs = ms => (window.firebase && firebase.firestore && firebase.firestore.Timestamp ? firebase.firestore.Timestamp.fromMillis(ms) : ms);
+const serverTs = () => firebase.firestore.FieldValue.serverTimestamp();
+async function syncPubCloud(k, check, timer) {
+  const col = P.cdb.collection(`pub/${k}/items`), items = new Map();
+  const take = docs => { for (const d of docs) items.set(d.id, { ...d.data(), id: d.id }); C.pub[k] = [...items.values()].filter(check); };
+  let cached = [];
+  try { cached = (await col.get({ source: 'cache' })).docs; } catch { /* no offline copy yet */ }
+  if (cached.length) take(cached);
+  else take((await col.get()).docs);
+  bump();
+  const mark = Math.max(0, ...[...items.values()].map(x => tsMs(x.ts))) - 10 * 60e3;   // 10 minutes of overlap
+  col.where('ts', '>', fsTs(Math.max(0, mark))).onSnapshot(snap => {
+    take(snap.docs);
+    if (!snap.metadata.fromCache) { clearTimeout(timer); C.liveState = 'ok'; }
+    bump();
+  }, () => { clearTimeout(timer); C.liveState = 'error'; bump(); });
+}
 function subscribeLive() {
   if (!P.cdb) { C.liveState = 'off'; return; }
+  if (P.cloud) {
+    C.liveState = 'loading';
+    const timer = setTimeout(() => { if (C.liveState === 'loading') { C.liveState = 'slow'; bump(); } }, 10000);
+    const check = { q: validQ, news: validNews, days: validDay };
+    for (const k of Object.keys(check)) syncPubCloud(k, check[k], timer).catch(() => { clearTimeout(timer); C.liveState = 'error'; bump(); });
+    return;
+  }
   C.liveState = 'loading';
   const timer = setTimeout(() => { if (C.liveState === 'loading') { C.liveState = 'slow'; bump(); } }, 10000);
   const check = { q: validQ, news: validNews, days: validDay };

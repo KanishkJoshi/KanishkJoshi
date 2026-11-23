@@ -1,0 +1,9 @@
+{
+  "indexes": [
+    { "collectionGroup": "lb", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "wk", "order": "ASCENDING" }, { "fieldPath": "wp", "order": "DESCENDING" }] },
+    { "collectionGroup": "lb", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "pw", "order": "ASCENDING" }, { "fieldPath": "pwp", "order": "DESCENDING" }] },
+    { "collectionGroup": "lb", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "mo", "order": "ASCENDING" }, { "fieldPath": "mp", "order": "DESCENDING" }] },
+    { "collectionGroup": "lb", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "pm", "order": "ASCENDING" }, { "fieldPath": "pmp", "order": "DESCENDING" }] }
+  ],
+  "fieldOverrides": []
+}

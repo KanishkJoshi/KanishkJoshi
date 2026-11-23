@@ -89,19 +89,25 @@ Your app is live at `https://<project-id>.web.app`. To use your own domain: Host
    (another Google account or a private window): the question is there.
 
 ## Costs and limits
-- The free **Spark** plan allows 50,000 document reads and 20,000 writes per day and 1 GiB of storage. With the
-  app as it is today, that covers a pilot of up to about 100 active students a day.
-- Why not more: every time the app opens it reads **every student's leaderboard entry**, and each answered
-  question saves the student's progress and leaderboard total (2 writes). Reads therefore grow with
-  students × app opens. Example: 300 students opening the app twice a day ≈ 180,000 reads a day, well over the
-  free limit. On the pay-as-you-go **Blaze** plan the bill would grow faster than the number of students.
-- Before a bigger launch: load only the top 100 of the leaderboard plus each student's own entry, save totals at
-  the end of each quiz instead of after every answer, and move points and leaderboard totals to Cloud Functions
-  (Blaze plan). Server-side scoring also makes prizes cheat-proof (see README → Path to production).
+- The free **Spark** plan allows 50,000 document reads and 20,000 writes per day and 1 GiB of storage. That covers
+  roughly **400 active students a day** (a rough estimate: about 70 reads per app session).
+- Reads stay flat as you grow, because the app:
+  - reads only each leaderboard's **top 50** (admin screens: top 500), when a screen shows it, at most every 2
+    minutes. This needs the indexes in `firestore.indexes.json`, which `firebase deploy` creates; the first
+    build takes a few minutes, and the leaderboard shows an error until it finishes;
+  - keeps admin content on the phone and listens only for items changed since its last sync (every admin write
+    carries a server timestamp `ts`, and a removal leaves a tombstone);
+  - saves progress and leaderboard totals in batches (every 15 and 30 seconds), and at once when a quiz ends or
+    the app goes to the background.
+- Beyond the free plan, switch to the pay-as-you-go **Blaze** plan; reads then cost a few rupees per 100,000, so a
+  large audience stays affordable. Check Firebase's pricing page for your region.
+- Before real-money prizes, move points and leaderboard totals to Cloud Functions (server-side scoring), so they
+  cannot be faked from a phone (see README → Path to production).
 
 ## Optional settings (`config.js`)
 | Key | Meaning |
 |---|---|
 | `allowGuest: true` | Also shows "Continue without signing in" (progress stays on that phone, no leaderboard). |
+| `adsense: { client: 'ca-pub-…', slot: '…' }` | Shows one AdSense display unit below the content on reading screens (never on quiz, exam, sign-in, profile or admin screens). Add `ads.txt` with the line AdSense gives you. |
 | `privacyUrl: 'https://…'` | Adds a privacy-policy link on the sign-in screen (needed for the Play Store). |
 | `aiEndpoint: 'https://…'` | Your server endpoint for the AI features (see README). |

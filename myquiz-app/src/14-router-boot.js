@@ -41,6 +41,8 @@ function render(routeChanged = false) {
   app.classList.toggle('no-nav', NO_NAV.has(route) || !!authGate());
   app.classList.toggle('exam-pad', route === 'exam');
   app.classList.toggle('enter', !!routeChanged);
+  if (P.cloud && P.uid) LB.ensure(LB_NEED[route === 'leaders' ? 'leaders-' + lbTab : route] || [], route.startsWith('admin') ? LB_TOP_ADMIN : LB_TOP);
+  Ads.onRoute(routeChanged);
   if (routeChanged) window.scrollTo(0, 0);
   if (DEMO) renderDemoStrip();
   afterRender();
@@ -124,6 +126,9 @@ document.addEventListener('keydown', e => {
 });
 // Save right away when the app goes to the background, so the leaderboard never misses points.
 window.addEventListener('online', () => { render(); toast(L('आप फिर ऑनलाइन हैं', 'You are back online')); });
+// Save batched progress and points when the app goes to the background or closes (self-hosted app).
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { U.flushSoon(0); LB.flushSoon(0); } });
+window.addEventListener('pagehide', () => { U.flushSoon(0); LB.flushSoon(0); });
 window.addEventListener('offline', () => render());
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'hidden') return;

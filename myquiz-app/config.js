@@ -7,10 +7,12 @@
 window.MYQUIZ_CONFIG = Object.assign({
   // firebase: {
   //   apiKey: 'AIza…',
-  //   authDomain: 'your-project.firebaseapp.com',
+  //   authDomain: 'quiz.yourcompany.in',   // the domain the app is served from (FIREBASE-SETUP.md step 5)
   //   projectId: 'your-project',
   //   appId: '1:123…:web:abc…',
   // },
   // allowGuest: false,          // true = also show "Continue without signing in" (progress stays on the device)
+  // privacyUrl: 'https://quiz.yourcompany.in/privacy.html',
+  // adsense: { client: 'ca-pub-0000000000000000', slot: '0000000000' },   // AdSense: publisher ID + one display ad unit ID
   // aiEndpoint: 'https://…',    // optional: your server endpoint for AI features (see README)
 }, window.MYQUIZ_CONFIG || {});

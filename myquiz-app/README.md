@@ -32,6 +32,7 @@ into a personalised learning app around **Learn → Practise → Understand → 
 - **Tester build (demo)** to share with testers: https://claude.ai/artifact/TYUHLNaspNcibKAUdXz7DY (see [Tester build](#tester-build-demo))
 - **Google sign-in for your own website/app:** [docs/FIREBASE-SETUP.md](docs/FIREBASE-SETUP.md) (one-time, about 20 minutes)
 - **Launch guide (Play Store, AdSense, uploading content, where data is stored):** https://claude.ai/artifact/QKu9z21XjiB5hpgxY66LAy (private until shared). The Play Store app is a Trusted Web Activity made with PWABuilder from the hosted site.
+- **Play Store listing kit:** [store/listing.md](store/listing.md) (Hindi + English texts), the feature graphics and 7 screenshots per language in `store/`; regenerate with `node tools/make-store-assets.js`.
 - **How admins upload content (Hindi + English):** [docs/ADMIN-GUIDE.md](docs/ADMIN-GUIDE.md) and the [CSV template](docs/question-template.csv)
 - Everything in this folder runs as-is on any static host and no framework is needed. `app.js` is assembled from `src/*.js` by `python3 tools/build.py`; run that after editing anything in `src/`.
 
@@ -108,7 +109,8 @@ With a Firebase config in `config.js`, the app opens on a **"Continue with Googl
 - **Admins:** Google emails listed in Firestore `admins/{email}`. The owner is set once in the console; after that the owner manages the **Admin team** inside the app.
 - **Security:** [`firestore.rules`](firestore.rules) lets students read and write only their own progress. The leaderboard accepts only a name and point totals within daily limits, and only admins publish or see drafts and reports.
 - **SDK:** the Firebase JS SDK 10.12.2 is bundled in `vendor/` (Apache-2.0) and loaded only when configured. `firebase.json` deploys the app and the rules to Firebase Hosting.
-- **Cost:** the free Firebase plan covers a pilot of about 100 active students a day, because each app open reads every leaderboard entry. Before a bigger launch, see [Costs and limits](docs/FIREBASE-SETUP.md#costs-and-limits).
+- **Cost:** reads stay flat as students grow: leaderboards read only their top 50 (with the indexes in `firestore.indexes.json`), admin content syncs incrementally (server timestamp `ts` + tombstones), and saves are batched. The free plan covers roughly 400 active students a day; see [Costs and limits](docs/FIREBASE-SETUP.md#costs-and-limits).
+- **AdSense (optional):** `adsense: { client, slot }` in `config.js` shows one display unit below the content on reading screens only (never on quiz, exam, sign-in, profile or admin screens), requested once per screen visit (`src/09b-ads.js`, tested in `tests/e2e-ads.js`).
 - **Play Store requirements:** students can delete their account in the app (**Profile → Delete my account**: progress, leaderboard entry, reports and login). `privacy.html` and `delete-account.html` are the policy pages Play asks for; fill in their placeholders. Inside an installed app or the Play Store app, sign-in uses a redirect, so `authDomain` must be the app's own domain (FIREBASE-SETUP.md step 5). `firebase.json` deploys `.well-known/assetlinks.json`.
 - **claude.ai versions:** they keep using claude.ai's own sign-in, because Google sign-in cannot run inside a claude.ai page.
 

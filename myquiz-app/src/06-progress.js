@@ -57,7 +57,10 @@ const U = {
     } catch { P.progressRemote = false; }
   },
   touch() { this.s.updatedAt = Date.now(); LS.set('progress', this.s); this.queue(); },
-  queue() { if (!P.progressRemote) return; clearTimeout(this.t); this.t = setTimeout(() => this.flush(), 1500); },
+  // Self-hosted (Firestore): save in batches to keep writes low; flushSoon() saves at the end of a quiz
+  // and when the app goes to the background (this phone keeps everything meanwhile).
+  queue() { if (!P.progressRemote) return; clearTimeout(this.t); this.t = setTimeout(() => { this.t = 0; this.flush(); }, P.cloud ? (Number(CFG.syncMs) || 15000) : 1500); },
+  flushSoon(ms = 800) { if (!this.t) return; clearTimeout(this.t); this.t = setTimeout(() => { this.t = 0; this.flush(); }, ms); },
   async flush() {
     if (!P.progressRemote) return;
     if (this.busy) { this.again = true; return; }

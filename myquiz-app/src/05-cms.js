@@ -14,6 +14,7 @@ const CMS = {
   },
   async putPub(coll, item) {
     const doc = clone(item);
+    if (P.cloud) { delete doc.gone; doc.ts = serverTs(); }   // the sync stamp students' phones listen for
     if (P.cdb) await P.cdb.doc(`pub/${coll}/items/${doc.id}`).set(doc);
     else { const arr = C.pub[coll]; const i = arr.findIndex(x => x.id === doc.id); if (i >= 0) arr[i] = doc; else arr.push(doc); this.saveLocal(); bump(); }
   },
@@ -25,7 +26,8 @@ const CMS = {
     await this.delDraft(d.id);
   },
   async unpublish(coll, id) {
-    if (P.cdb) await P.cdb.doc(`pub/${coll}/items/${id}`).delete();
+    if (P.cloud) await P.cdb.doc(`pub/${coll}/items/${id}`).set({ id, gone: true, ts: serverTs() });   // a tombstone, so phones drop it too
+    else if (P.cdb) await P.cdb.doc(`pub/${coll}/items/${id}`).delete();
     else { C.pub[coll] = C.pub[coll].filter(x => x.id !== id); this.saveLocal(); bump(); }
   },
   async hide(coll, id) { await this.putPub(coll, { id, hidden: true, publishAt: todayISO(), publishedAt: Date.now() }); },
