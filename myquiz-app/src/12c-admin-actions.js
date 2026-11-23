@@ -58,6 +58,7 @@ Object.assign(ACTIONS, {
 // Sign-in, sign-out, upload help and the admin team (self-hosted app with Google sign-in)
 Object.assign(ACTIONS, {
   'google-signin': () => signInGoogle(),
+  'delete-account': () => confirmSheet(L('अपना खाता हमेशा के लिए हटाएँ?', 'Delete your account for good?'), L('आपकी सारी प्रगति, पॉइंट्स, लीडरबोर्ड नाम और त्रुटि रिपोर्ट हट जाएँगी और वापस नहीं आएँगी। पहले Google आपसे आपका खाता चुनकर पुष्टि करने को कहेगा।', 'All your progress, points, leaderboard name and error reports are removed and cannot be brought back. Google first asks you to confirm by choosing your account.'), L('खाता हटाएँ', 'Delete account'), () => deleteAccount()),
   signout: () => confirmSheet(L('साइन आउट करें?', 'Sign out?'), L('आपकी प्रगति आपके Google खाते में सुरक्षित रहेगी। इस फ़ोन से स्थानीय डेटा हटा दिया जाएगा।', 'Your progress stays safe in your Google account. Local data on this phone will be cleared.'), L('साइन आउट', 'Sign out'), () => signOutAll(), false),
   guest: () => { FB.guest = true; LS.set('guest', true); subscribeLive(); go(U.s.onb ? 'home' : 'welcome'); },
   reload: () => location.reload(),

@@ -20,7 +20,7 @@ shown to every student immediately.
    window.MYQUIZ_CONFIG = Object.assign({
      firebase: {
        apiKey: 'AIza…',
-       authDomain: 'myquiz-xxxx.firebaseapp.com',
+       authDomain: 'myquiz-xxxx.firebaseapp.com',   // change to your own domain in step 5
        projectId: 'myquiz-xxxx',
        appId: '1:1234…:web:abcd…',
      },
@@ -39,9 +39,17 @@ shown to every student immediately.
    - the leaderboard holds only names and point totals;
    - only admins can publish content or see drafts and reports.
 
-## 5. Allow your website's domain
-**Authentication → Settings → Authorized domains → Add domain** → your site, for example `quiz.yourcompany.in`.
-(`*.web.app` and `*.firebaseapp.com` from Firebase Hosting are already allowed.)
+## 5. Allow your website's domain (and make login work inside the Play Store app)
+1. **Authentication → Settings → Authorized domains → Add domain** → your site, for example `quiz.yourcompany.in`.
+   (`*.web.app` and `*.firebaseapp.com` from Firebase Hosting are already allowed.)
+2. In `config.js`, set `authDomain` to **the domain the app is served from** (for example `quiz.yourcompany.in`),
+   not `…firebaseapp.com`. Browsers that block third-party storage, and the Play Store app (a Trusted Web Activity,
+   which signs in with a full-page redirect), need the sign-in helper on the app's own domain. Firebase Hosting
+   serves that helper at `/__/auth/handler` automatically.
+3. Google Cloud console (same project) → **APIs & Services → Credentials** → *Web client (auto created by Google
+   Service)* → **Authorized redirect URIs** → add `https://quiz.yourcompany.in/__/auth/handler` → **Save**.
+
+See Firebase's [redirect best practices](https://firebase.google.com/docs/auth/web/redirect-best-practices).
 
 ## 6. Make yourself the owner (first admin)
 1. **Firestore Database → Data → Start collection** → Collection ID: `admins`.
@@ -63,6 +71,16 @@ firebase deploy                      # uploads the app and the Firestore rules
 Your app is live at `https://<project-id>.web.app`. To use your own domain: Hosting → *Add custom domain*.
 
 **Option B — any static host:** upload the folder (without `src/`, `tools/`, `tests/`, `docs/`) and add the domain in step 5.
+
+**Policy pages and the Play Store files** (deployed with the app):
+- `privacy.html` and `delete-account.html`: replace every `[PLACEHOLDER]` (company name, contact email, region,
+  date), then set `privacyUrl: 'https://quiz.yourcompany.in/privacy.html'` in `config.js`. Google Play asks for both
+  addresses (privacy policy, and the account-deletion link in the Data safety form).
+- `.well-known/assetlinks.json`: the file PWABuilder generates for the Play Store package. `firebase.json` deploys
+  the `.well-known` folder (it is no longer ignored as a dotfile). Add the SHA-256 of the Play app-signing key from
+  Play Console → App integrity next to the one PWABuilder wrote, or the Play app shows a browser address bar.
+- Students can delete their account in the app (**Profile → Delete my account**): it removes their progress,
+  leaderboard entry, error reports and login. `firestore.rules` lets each student delete their own documents.
 
 ## 8. Check it
 1. Open the site → **Continue with Google** → choose your account → onboarding → Home.

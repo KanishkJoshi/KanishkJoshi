@@ -34,7 +34,7 @@ service cloud.firestore {
       allow read: if isSelf(uid) || isAdmin();
       allow create, update: if isAdmin()
         || (isSelf(uid) && request.resource.data.keys().hasOnly(['items']) && request.resource.data.items.size() <= 50);
-      allow delete: if isAdmin();
+      allow delete: if isSelf(uid) || isAdmin();   // students delete their own reports with "Delete my account"
     }
 
     // Private progress (answers, points, settings): only the learner.

@@ -71,16 +71,28 @@ async function onAuth(u) {
   startCloud();
   await U.syncRemote();
   if (!U.s.name && P.authUser.name) { U.s.name = P.authUser.name.split(/\s+/)[0]; onb.name = U.s.name; U.touch(); }
+  const del = LS.get(DEL_KEY, null);           // back from Google's confirmation inside the installed app
+  if (del && del.uid === u.uid && Date.now() - del.at < 10 * 60e3) { deleteAccount(true); return; }
+  LS.del(DEL_KEY);
   LB.queue();
   if (!U.s.onb) go('welcome');                 // new learners always set up language, exam and goal first
   else if (route === 'login' || route === 'welcome') go('home');
   else render();
+}
+// Inside the Play Store app (a Trusted Web Activity) or an installed app a popup opens outside the app,
+// so sign-in uses a full-page redirect there (this needs authDomain = the app's own domain, see FIREBASE-SETUP.md).
+function inInstalledApp() {
+  try { return matchMedia('(display-mode: standalone)').matches || String(document.referrer).startsWith('android-app://') || navigator.standalone === true; }
+  catch { return false; }
 }
 async function signInGoogle() {
   if (FB.busy || !window.firebase) return;
   FB.busy = true; FB.err = ''; render();
   const provider = new firebase.auth.GoogleAuthProvider();
   try { provider.setCustomParameters({ prompt: 'select_account' }); } catch { /* optional */ }
+  if (inInstalledApp()) {
+    try { await firebase.auth().signInWithRedirect(provider); return; } catch (e) { FB.err = authMsg(e); FB.busy = false; render(); return; }
+  }
   try { await firebase.auth().signInWithPopup(provider); }
   catch (e) {
     const code = e && e.code;
@@ -93,6 +105,35 @@ async function signInGoogle() {
 async function signOutAll() {
   try { clearTimeout(U.t); await U.flush(); } catch { /* best effort */ }
   try { await firebase.auth().signOut(); } catch { /* ignore */ }
+  clearLocalLearner();
+  try { history.replaceState(null, '', '#login'); } catch { /* ignore */ }
+  location.reload();
+}
+// "Delete my account" (Google Play requires it for apps with a login): Google first asks the student to
+// confirm their account, then their progress, leaderboard entry, error reports and the login itself are removed.
+const DEL_KEY = 'del-pending';
+async function deleteAccount(resumed = false) {
+  const user = window.firebase && firebase.auth().currentUser;
+  if (!user || FB.busy) return;
+  FB.busy = true; render();
+  try {
+    if (!resumed) {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      if (inInstalledApp()) { LS.set(DEL_KEY, { uid: user.uid, at: Date.now() }); await user.reauthenticateWithRedirect(provider); return; }
+      await user.reauthenticateWithPopup(provider);
+    }
+    clearTimeout(U.t); clearTimeout(LB.t); P.progressRemote = false; LB.denied = true;
+    for (const path of [`data/users/${user.uid}/progress`, `lb/${user.uid}`, `reports/${user.uid}`]) await P.cdb.doc(path).delete();
+    await user.delete();
+  } catch (e) {
+    LS.del(DEL_KEY); FB.busy = false; P.progressRemote = true; LB.denied = false;
+    if (!e || !['auth/popup-closed-by-user', 'auth/cancelled-popup-request'].includes(e.code)) {
+      toast(e && e.code === 'auth/user-mismatch' ? L('कृपया उसी Google खाते से पुष्टि करें जिससे आप साइन इन हैं।', 'Please confirm with the same Google account you are signed in with.') : L('खाता नहीं हट सका — इंटरनेट जाँचकर फिर कोशिश करें।', 'The account could not be deleted — check the internet and try again.'));
+    }
+    render();
+    return;
+  }
+  LS.del(DEL_KEY);
   clearLocalLearner();
   try { history.replaceState(null, '', '#login'); } catch { /* ignore */ }
   location.reload();
@@ -134,5 +175,7 @@ function accountCard() {
   if (FB.state !== 'in') return `<section class="card" style="display:flex;flex-direction:column;gap:10px"><h2 class="sec-title" style="font-size:1.05rem">${ic('user')} ${L('खाता', 'Account')}</h2><p class="small muted" style="margin:0">${L('आप साइन इन नहीं हैं — प्रगति केवल इस फ़ोन पर है और लीडरबोर्ड में नहीं जुड़ती।', 'You are not signed in — progress stays on this phone and does not join the leaderboard.')}</p><button class="btn btn-google btn-block" data-act="google-signin">${GOOGLE_G}<span>${L('Google से साइन इन करें', 'Sign in with Google')}</span></button></section>`;
   const a = P.authUser || {};
   return `<section class="card account"><div class="sum-top">${a.photo ? `<img class="acc-photo" src="${esc(a.photo)}" alt="" referrerpolicy="no-referrer" width="48" height="48">` : `<span class="lvl-badge" style="width:48px;height:48px">${esc(initial(a.name || a.email || '?'))}</span>`}<span class="row-main"><b>${esc(a.name || L('विद्यार्थी', 'Student'))}</b><span class="row-sub">${esc(a.email || '')}</span><span class="row-sub">${ic('graduation')} ${P.owner ? L('मालिक (एडमिन)', 'Owner (admin)') : P.isAdmin ? L('एडमिन', 'Admin') : L('विद्यार्थी', 'Student')} · Google</span></span></div>
-  <button class="btn btn-outline btn-block" data-act="signout">${ic('arrow-left')} ${L('साइन आउट', 'Sign out')}</button></section>`;
+  <button class="btn btn-outline btn-block" data-act="signout">${ic('arrow-left')} ${L('साइन आउट', 'Sign out')}</button>
+  <button class="btn btn-danger btn-block" data-act="delete-account" ${FB.busy ? 'disabled' : ''}>${ic('trash')} ${L('मेरा खाता हटाएँ', 'Delete my account')}</button>
+  <p class="small muted" style="margin:0">${L('आपकी प्रगति, पॉइंट्स, लीडरबोर्ड नाम और त्रुटि रिपोर्ट हमेशा के लिए हट जाएँगी।', 'Your progress, points, leaderboard name and error reports are removed for good.')}${safeUrl(CFG.privacyUrl) ? ` <a href="${esc(safeUrl(CFG.privacyUrl))}" target="_blank" rel="noopener noreferrer">${L('गोपनीयता नीति', 'Privacy policy')}</a>` : ''}</p></section>`;
 }

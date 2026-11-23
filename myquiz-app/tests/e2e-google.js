@@ -43,7 +43,7 @@ const FAKE = `(() => {
     onSnapshot: (fn, err) => { if (!canRead(path)) { setTimeout(() => err && err(denied()), 5); return () => {}; } const l = { kind: 'c', path, fn }; listeners.add(l); setTimeout(() => fn({ docs: docsOf(path), metadata: { fromCache: false } }), 5); return () => listeners.delete(l); } });
   const authCbs = [];
   const auth = {
-    get currentUser() { return st.user; },
+    get currentUser() { return st.user && Object.assign({}, st.user, { reauthenticateWithPopup: async () => ({ user: st.user }), reauthenticateWithRedirect: async () => {}, delete: async () => { st.deleted = (st.deleted || []).concat(st.user.uid); st.user = null; save(); authCbs.forEach(cb => cb(null)); } }); },
     onAuthStateChanged(cb) { authCbs.push(cb); setTimeout(() => cb(st.user), 20); return () => {}; },
     async getRedirectResult() { return { user: null }; },
     async signInWithPopup() { const n = window.__next || { uid: 'g_asha', displayName: 'Asha Verma', email: 'asha@example.com', photoURL: '' }; st.user = n; save(); authCbs.forEach(cb => cb(st.user)); return { user: st.user }; },
@@ -152,10 +152,34 @@ const FAKE = `(() => {
   await go('learn', '.list .row');
   check((await page.textContent('main')).length > 0, 'published content loads for the new account');
 
-  // 6. Guest mode (when allowed) works offline-style and invites sign-in on the leaderboard
+  // 6. A student deletes their account (a Google Play requirement): their data and their login are removed
   await go('profile', '[data-act="signout"]');
   await page.click('[data-act="signout"]');
   await page.click('.sheet [data-act="confirm-ok"]');
+  await page.waitForSelector('[data-act="google-signin"]:not([disabled])');
+  await page.evaluate(() => { window.__next = { uid: 'g_meena', displayName: 'Meena Rao', email: 'meena@example.com', photoURL: '' }; });
+  await page.click('[data-act="google-signin"]');
+  await page.waitForSelector('.onb-page #wz-name');
+  await page.click('[data-act="wz-finish"]');
+  await page.waitForSelector('.dash .next');
+  await go('subject/history', '[data-act="start-subject"]');
+  await page.click('[data-act="start-subject"]');
+  await page.waitForSelector('.opt');
+  await page.click('.opt >> nth=0');
+  await page.waitForTimeout(3200);
+  let s6 = await store();
+  check(!!s6['data/users/g_meena/progress'] && !!s6['lb/g_meena'], 'a new student has progress and a leaderboard entry');
+  await go('profile', '[data-act="delete-account"]');
+  await page.click('[data-act="delete-account"]');
+  await page.click('.sheet [data-act="confirm-ok"]');
+  await page.waitForSelector('[data-act="google-signin"]:not([disabled])');
+  s6 = await store();
+  const mock = await page.evaluate(() => JSON.parse(localStorage.getItem('__fbmock') || '{}'));
+  check(!s6['data/users/g_meena/progress'] && !s6['lb/g_meena'] && !s6['reports/g_meena'], 'delete my account removes progress, leaderboard entry and reports');
+  check(!mock.user && (mock.deleted || []).includes('g_meena'), 'delete my account removes the login');
+  check((await page.evaluate(() => localStorage.getItem('mq.owner'))) === null, 'nothing of the deleted account stays on the phone');
+
+  // 7. Guest mode (when allowed) works offline-style and invites sign-in on the leaderboard
   await page.waitForSelector('[data-act="guest"]');
   await page.click('[data-act="guest"]');
   await page.waitForSelector('.onb-page, .dash .next');
@@ -166,7 +190,7 @@ const FAKE = `(() => {
   if (!lbText.includes('Sign in with Google to join the leaderboard')) step('leaders (guest): ' + lbText.replace(/\s+/g, ' ').slice(0, 300));
   check(lbText.includes('Sign in with Google to join the leaderboard'), 'guests are invited to sign in for the leaderboard');
 
-  // 7. The real SDK files load and expose the API the app uses
+  // 8. The real SDK files load and expose the API the app uses
   const p2 = await browser.newPage();
   await p2.goto('http://127.0.0.1:8765/docs/');
   const api = await p2.evaluate(async () => {

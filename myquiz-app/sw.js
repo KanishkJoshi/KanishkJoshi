@@ -3,7 +3,7 @@
  * - /data/*.json content: network first so new current affairs appear, cache when offline.
  * - Google Fonts: cache first.
  * Bump CACHE when shipping breaking changes to force a clean cache. */
-const CACHE = 'myquiz-v4.0';
+const CACHE = 'myquiz-v4.1';
 const SHELL = ['./', './index.html', './app.js', './config.js', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png',
   './data/questions.json', './data/news.json', './data/days.json'];
 
@@ -19,6 +19,7 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  if (url.pathname.startsWith('/__/')) return;   // Firebase's sign-in helper on the app's own domain: never cached
   if (url.origin === self.location.origin && url.pathname.includes('/data/')) {
     e.respondWith(fetch(req).then(res => put(req, res)).catch(() => caches.match(req)));
   } else if (url.origin === self.location.origin) {

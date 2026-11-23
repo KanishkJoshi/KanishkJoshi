@@ -1,10 +1,11 @@
 {
   "hosting": {
     "public": ".",
-    "ignore": ["firebase.json", "firestore.rules", "**/.*", "**/node_modules/**", "src/**", "tools/**", "tests/**", "docs/**", "dist/**", "README.md"],
+    "ignore": ["firebase.json", "firestore.rules", ".git/**", "**/.gitignore", "**/.DS_Store", ".firebase/**", ".firebaserc", "**/node_modules/**", "src/**", "tools/**", "tests/**", "docs/**", "dist/**", "README.md"],
     "headers": [
       { "source": "sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
-      { "source": "config.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+      { "source": "config.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+      { "source": ".well-known/assetlinks.json", "headers": [{ "key": "Content-Type", "value": "application/json" }] }
     ]
   },
   "firestore": { "rules": "firestore.rules" }
